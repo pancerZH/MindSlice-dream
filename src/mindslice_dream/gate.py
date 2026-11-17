@@ -5,7 +5,8 @@ import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-DREAM_PREFIX = "[dream]"
+# reasons of the dream session's writes and of the patches the email review makes for the user: neither triggers a run
+DREAM_PREFIXES = ("[dream]", "[dream-review]")
 
 
 def mindslice_json(cfg: dict, *args: str) -> dict:
@@ -44,7 +45,7 @@ def position(events: list[dict], fallback: dict | None = None) -> dict | None:
 
 
 def is_dream(e: dict) -> bool:
-    return (e.get("reason") or "").startswith(DREAM_PREFIX)
+    return (e.get("reason") or "").startswith(DREAM_PREFIXES)
 
 
 def card_path(address: str) -> str:

@@ -1,0 +1,8 @@
+[Unit]
+Description=MindSlice-dream: check for review replies every 10 minutes (returns at once when nothing is pending)
+
+[Timer]
+OnCalendar=*:0/10
+
+[Install]
+WantedBy=timers.target

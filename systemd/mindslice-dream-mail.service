@@ -1,0 +1,11 @@
+[Unit]
+Description=MindSlice-dream: carry out replies to the review mail (IMAP -> agy reads the reply -> apply / discard)
+
+[Service]
+Type=oneshot
+# @REPO@ is replaced by the repository's absolute path when the unit is installed (see README)
+WorkingDirectory=@REPO@
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/uv run mindslice-dream mail
+TimeoutStartSec=30min
+Nice=10

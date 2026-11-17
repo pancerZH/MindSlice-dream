@@ -42,6 +42,8 @@ def test_other_sessions_writes_trigger_grouped_per_card(cfg, ws):
 def test_dream_and_invest_writes_do_not_trigger(cfg, ws):
     settle(cfg)
     ms(ws, "write", "projects/demo/other", "--title", "O", "--summary", "O.", "--content", "- o", "--reason", "[dream] x")
+    ms(ws, "write", "projects/demo/other", "--op", "append", "--content", "- p",
+       "--reason", "[dream-review] 用户回复审阅邮件：改一下")  # the email review's patch for the user
     ms(ws, "write", "invest/theses/x", "--title", "X", "--summary", "X.", "--content", "- x", "--tag", "invest",
        "--reason", "news-agent run")
     t = task(cfg)

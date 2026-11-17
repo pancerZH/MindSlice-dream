@@ -19,6 +19,13 @@ exclude_prefixes = ["invest/"]   # 由别的流程审阅的卡，dream 不碰（
 [watch]
 repos = []   # 例如 ["~/code/my-project", "~/code/my-other-project"]
 
+# 邮件审阅（PLAN 第 10 节）：to 为空就不发邮件。夜间运行后把 dream 暂存的改动发到 to，回复邮件即可批准、放弃或修改
+[mail]
+to = ""                                      # 只放自己的邮箱，例如发件账号的 plus 地址 <账号>+dream@gmail.com
+account = "~/.config/news-agent/smtp.toml"   # 发信和收信的 Gmail 账号：host、port、username、password（news-agent 的格式）
+imap = "imap.gmail.com"
+timeout_minutes = 10                         # 解读一封回复的 agy 会话
+
 # {prompt} 换成渲染后的 prompt；resume 里的 {session_id} 换成会话 id
 [harness]
 timeout_minutes = 60

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from conftest import ROOT, ms
-from mindslice_dream import cli, gate, runner
+from mindslice_dream import cli, gate, runner, session
 
 
 def gone(pid: int, wait: float = 3.0) -> bool:
@@ -40,7 +40,7 @@ def test_ok_run_advances_the_checkpoint(cfg, ws):
 
     run_dir = Path(meta["run_dir"])
     # only the run record stays: the session's work/ (batch.json) and the stray notes.txt are gone
-    assert {p.name for p in run_dir.iterdir()} == runner.RUN_RECORD
+    assert {p.name for p in run_dir.iterdir()} == session.RUN_RECORD
     report = (cfg["paths"]["runs"] / "latest.md").read_text()
     assert report.startswith("# Dream 报告") and "## 脚本检查" in report and "checkpoint 已推进" in report
     prompt = (run_dir / "prompt.md").read_text()
@@ -101,7 +101,7 @@ def test_timeout_stops_the_session_and_tidies_up(cfg, monkeypatch):
     meta = runner.run(cfg)
     assert meta["status"] == "timeout"
     assert gone(session_output(meta)[0]["pid"])
-    assert {p.name for p in Path(meta["run_dir"]).iterdir()} == runner.RUN_RECORD
+    assert {p.name for p in Path(meta["run_dir"]).iterdir()} == session.RUN_RECORD
 
 
 def test_processes_left_by_the_session_are_stopped(cfg, monkeypatch):

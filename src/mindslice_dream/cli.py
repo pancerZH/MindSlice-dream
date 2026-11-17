@@ -1,4 +1,5 @@
-"""mindslice-dream run [--force] [--dry-run]: the nightly dream pass over a MindSlice workspace."""
+"""mindslice-dream run [--force] [--dry-run] | mail [--send]: the nightly dream pass over a MindSlice workspace,
+and the review of its staged changes by email."""
 
 import argparse
 import json
@@ -7,7 +8,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from . import runner
+from . import review, runner
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config.toml"
 
@@ -30,6 +31,9 @@ def load_config(path: Path) -> dict:
     mem["mindslice"] = found
     cfg["paths"] = {k: resolve(v) for k, v in cfg["paths"].items()}
     cfg["repos"] = [resolve(r) for r in cfg["watch"]["repos"]]
+    cfg.setdefault("mail", {"to": ""})  # no [mail] section: no review mails
+    if "account" in cfg["mail"]:
+        cfg["mail"]["account"] = resolve(cfg["mail"]["account"])
     return cfg
 
 
@@ -40,9 +44,21 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("run", help="gate, then one dream session and the post-run checks")
     p.add_argument("--force", action="store_true", help="start the session even if the gate finds nothing to do")
     p.add_argument("--dry-run", action="store_true", help="only run the gate and print input.json")
+    p = sub.add_parser("mail", help="carry out the replies to the review mail (what the 10-minute timer runs)")
+    p.add_argument("--send", action="store_true", help="mail the pending dream changes now instead")
     args = ap.parse_args(argv)
 
-    meta = runner.run(load_config(args.config), force=args.force, dry_run=args.dry_run)
+    cfg = load_config(args.config)
+    if args.cmd == "mail":
+        if args.send:
+            result = review.send_now(cfg)
+            print(f"mail: {result}")
+            return 1 if result.startswith("failed") else 0
+        for line in review.poll(cfg):
+            print(f"mail: {line}")
+        return 0
+
+    meta = runner.run(cfg, force=args.force, dry_run=args.dry_run)
     if meta["status"] == "dry-run":
         print(json.dumps(meta["input"], ensure_ascii=False, indent=2))
         return 0
@@ -54,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  ! {line}")
     if meta["resume"]:
         print(f"  resume: {meta['resume']}")
+    print(f"  mail: {meta['mail']}")
     return 0 if meta["status"] == "ok" else 1
 
 
