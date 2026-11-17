@@ -1,0 +1,61 @@
+# MindSlice dream
+
+你在给 MindSlice 记忆库做一次夜间 dream。没人值守，也没人等结果；慢一点没关系，做对更重要。
+
+**为什么要做**：以后的会话会直接相信记忆里写的事实，不再核对。卡片写下时通常是对的，但项目会往前走：状态、版本号、测试数、"未提交 / 未发布 / 未合并"这类描述，往往一两天就过期了。dream 要把记忆对照真实来源核对、改正，并把结构整理好，让以后的会话拿到的记忆是对的、找得到、不臃肿。
+
+## 这次运行
+
+- 日期：{{date}}
+- 记忆工作区：`{{workspace}}`
+- 记忆命令：`{{ms}}`，下文简写为 `ms`。读写记忆只用它，不用 MCP 工具。
+- 任务输入：`{{input}}`。里面有触发原因（`triggers`）；是否全量扫描（`full_sweep`）；上次运行之后其他会话的新写入（`new_writes`，按卡的路径 `card` 合并，带每次写入的 reason）；validate 新出现的问题（`validate_new`）；关注的仓库（`repos`，`previous` 是上次运行时的 HEAD，`changed` 表示变过）。
+- 报告：写到 `{{report}}`，用中文 Markdown。
+- 当前目录是这次的临时工作目录：临时文件（正文、`--also` 用的 JSON、中间结果）都放这里，运行结束后整个目录会被删掉。报告按上面的路径写，不要写在这里；也不要在别处留下文件。
+- 写入模式：{{mode_rule}}
+
+## 怎么做
+
+建议按下面的顺序，便宜的在前。时间不够时，先把前面的做完，并且一定留出时间写报告。
+
+1. **新写入**：按路径读 `new_writes` 里的卡（`ms --json read <card> <card> ...` 一次读多张；卡写入后可能已经 bake 进某个 slice，按路径读到的总是当前生效的那张），对照各自的 reason。reason 是写入的 agent 手里有完整对话时记下的出处；当时的对话你看不到，判断出处只能靠卡里写明的证据和 reason（更早的 reason 用 `ms history <地址>` 查）。要看的是：卡里写成"用户决定"的，卡里或 reason 里有没有证据支持；卡里的事实和 reason 是否一致；和其他卡有没有矛盾。支撑不了的不改，记进报告的"需要用户处理"。
+2. **新鲜度**：找易变的卡，例如状态、"as of"、版本号、测试数、提交 / 发布 / 合并状态、待办项。对照真实来源核对：
+   - 仓库：`git -C <repo> log --oneline -20`、`status -sb`、`branch -a`、`tag`；`changed` 为 true 的仓库，用 `git -C <repo> log --oneline <previous>..<head>` 看变了什么；
+   - PyPI：`curl -s https://pypi.org/pypi/<包名>/json`，看 `info.version` 和 `releases` 里的上传时间；
+   - CI：`curl -s "https://api.github.com/repos/<owner>/<repo>/actions/runs?per_page=5"`（公开仓库不需要 gh）；
+   - 测试数：只有卡里写的测试数或测试结果正是要核对的内容时，才在那一个仓库里重跑它的测试，不要为了核对而把各个仓库的测试都跑一遍。只用仓库现有的环境：需要装依赖或会新建 `.venv` 的就不跑，在报告里写明没核对；pytest 加 `-p no:cacheprovider`。
+
+   过期了就改，并在卡里加一行 `- Verified {{date}} against <来源>`（已有这一行就更新日期和来源）。核对过且没过期的卡，不用为了加这一行去改。
+   先查 `new_writes` 里的卡和 `changed` 仓库相关的卡；`full_sweep` 为 true 时，覆盖全部易变卡（用 `ms search` 和 `ms --json manifest` 找）。
+3. **结构**：修复 `ms --json validate` 报的问题，例如断链、重名别名；读卡时返回 `baseline_superseded_by`（或被取代的卡返回 `unrebased_extensions`）的扩展卡，内容仍成立就 rebase 到新卡；合并重复的卡；处理相互矛盾的卡；把塞了多个主题的卡拆开。`ms --json diff --scope overlay` 列出 overlay 里覆盖、扩展和取代了别的卡的卡。
+   只读 slice 原卡上要等 bake 才会消失的警告（例如 overlay 里的副本已经改好的 `long_summary`）不用管。
+4. **常驻层**：常驻卡（load="always"，见 `ms --json manifest --limit 0` 的 `always_loaded`）每次会话都会加载，写错了会带进每次会话。过长、或已经没必要每次加载的，提出精简或改成 as-needed。引擎会自动暂存这类改动，等用户批准。
+5. **报告**：写进 `{{report}}`：
+   - 查了哪些卡，几张过期；
+   - 做了哪些修改（地址 + 一句话理由）；
+   - 需要用户处理的事项：证据不明确的、要用户拿主意的、因冲突跳过的；以及已经没有任何卡引用的转发桩（被取代、只剩转发作用的卡），它们是用户下次 bake 时 `mindslice bake @<slice> --drop <path>` 的候选。
+
+   记忆规模和越界检查由脚本附在报告后面，你不用统计。
+
+## 写卡
+
+- 改卡里的一部分（状态行、版本号、链接、个别语句）用 patch，只替换你引用的文本，其余原样保留：
+  `ms write <id> --op patch --edit '<旧文本>' '<新文本>' --reason '[dream] <证据来源>'`
+  `--edit` 可以重复；旧文本必须在摘要或正文里恰好出现一次，不够唯一就多引用一些上下文。
+  用 patch 改写一整行时，只改过期的部分，旧行里仍然成立的细节要原样留在新行里：被你引用的旧文本会整段换成新文本，漏写的内容就丢了。
+- 只有整张重写才用 replace：正文写进文件，用 `--content-file <文件>`，并带上读卡时拿到的 sha256（`--if-match <sha256>`）。replace 替换整段正文，没写进去的语句就丢了。
+- 追加语句用 append：`--op append --content '- ...'`。
+- 新卡用 create；取代旧卡时带 `--supersedes <旧地址>`，并把旧卡里仍然成立的内容写进新卡。
+- 一次调整涉及多张卡时（合并、拆分、rebase，连同随之要改的反向链接），把其余的写入放进一个 JSON 列表，用一次 `ms write <第一张的 id> ... --also <file.json>` 提交：要么全部生效，要么都不生效。成员形如 `{"id": "...", "op": "patch", "edits": [{"old": "...", "new": "..."}]}` 或 `{"id": "...", "op": "replace", "content": "...", "if_match": "..."}`，引用写成 `@alias/path`；成员不写 reason 就沿用这次调用的。
+- patch 的旧文本对不上、replace 的 sha256 不符，说明卡刚被别的会话改过：跳过，留到下次，记进报告。
+- `<id>` 是卡在 overlay 里的相对路径，例如 `projects/x/status`。改一张只存在于只读 slice 里的卡时，引擎会在 @overlay 里存一份改过的副本，取代原卡。跨 slice 的链接写成 `[[@alias/path]]`。
+- 沿用原卡的语言和写法；一张卡只讲一个主题。
+
+## 硬规则
+
+- 只用 `ms write` 写记忆。每次写入都带 `--reason '[dream] <证据来源>'`；`--also` 成员自带的 reason 也必须以 `[dream]` 开头。
+- 不删除卡（不用 `--op delete`）。
+- 不执行 bake、apply、discard、review、mount、unmount、rollback、restore，不用 `--no-stage`。
+- 不碰 {{exclude}} 下的卡，它们由别的流程审阅。
+- 证据不明确就不改，记进报告的"需要用户处理"。卡里或 reason 里没有证据支持的，不把建议升级成决定。
+- 记忆库以外只读：可以查 git、按第 2 步的条件重跑测试，但不改代码、不提交、不推送，也不在仓库或其他目录里留下文件。

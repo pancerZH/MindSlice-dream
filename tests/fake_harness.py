@@ -1,0 +1,67 @@
+"""Stand-in for agy: reads the rendered dream prompt and acts like a dream session.
+
+By default it patches the first card of new_writes, sends one --also batch (append + create), writes the
+report and answers with a session id, staging every write in stage mode; it also leaves a stray file in the run
+directory. FAKE_DREAM changes that: delete | invest | apply | error | nostage | always | concurrent | straggler |
+noreport | answer | fail | sleep.
+"""
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+prompt = sys.argv[1]
+ms = shlex.split(re.search(r"记忆命令：`([^`]+)`", prompt).group(1))
+workspace = Path(re.search(r"记忆工作区：`([^`]+)`", prompt).group(1))
+task = json.loads(Path(re.search(r"任务输入：`([^`]+)`", prompt).group(1)).read_text())
+report = Path(re.search(r"报告：写到 `([^`]+)`", prompt).group(1))
+mode = os.environ.get("FAKE_DREAM", "")
+stage = ["--stage"] if task["mode"] == "stage" and mode != "nostage" else []
+seen = {"cwd": os.getcwd(), "env": {k: os.environ.get(k) for k in ("MINDSLICE_PLUGIN_ISOLATE", "MINDSLICE_WORKSPACE",
+                                                                    "PYTHONDONTWRITEBYTECODE")}}
+
+
+def write(card: str, *args: str, reason: str = "[dream] fake: checked against git log", flags=None) -> None:
+    subprocess.run([*ms, "write", card, *args, "--reason", reason, *(stage if flags is None else flags)],
+                   check=True, capture_output=True)
+
+
+if mode == "sleep":
+    print(json.dumps({"pid": os.getpid()}), flush=True)
+    time.sleep(30)
+if mode == "fail":
+    sys.exit(3)
+
+card = task["new_writes"][0]["card"]
+write(card, "--op", "patch", "--edit", "uncommitted", "committed in abc1234")
+Path("batch.json").write_text(json.dumps([{"id": "projects/demo/notes", "op": "create", "title": "Demo notes",
+                                           "summary": "Notes split out of the demo status card.",
+                                           "content": "- Split out by the dream pass."}]))
+write(card, "--op", "append", "--content", "- Verified 2026-11-18 against git log", "--also", "batch.json")
+
+if mode == "delete":
+    write(card, "--op", "delete")
+elif mode == "invest":
+    write("invest/theses/x", "--title", "x", "--summary", "x.", "--content", "- x", "--tag", "invest")
+elif mode == "apply":
+    subprocess.run([*ms, "apply"], check=True, capture_output=True)
+elif mode == "error":
+    (workspace / "overlay" / "broken.md").write_text("+++\ntitle = \n+++\n")
+elif mode == "always":
+    write("prefs/p", "--op", "append", "--content", "- Also be kind.", flags=["--no-stage"])
+elif mode == "straggler":  # a background process in its own session, still running when the session ends
+    seen["straggler"] = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True).pid
+elif mode == "concurrent":
+    write("projects/demo/other", "--title", "Other", "--summary", "Another session's card.", "--content", "- o",
+          reason="Another session recorded this.")
+
+if mode not in ("noreport", "answer"):
+    report.write_text("# Dream 报告\n\n- 查了 1 张卡，1 张过期，已改正。\n")
+(report.parent / "notes.txt").write_text("scratch written next to the report")
+answer = {"answer": {"response": "# 来自最终回答的报告\n"}, "noreport": {}}.get(mode, {"response": "done"})
+print(json.dumps({"session_id": "fake-dream-1", **answer, **seen}))

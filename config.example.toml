@@ -1,0 +1,27 @@
+# MindSlice-dream 配置模板：复制成 config.toml 再按本机修改（config.toml 不进 git）。
+# 相对路径都相对配置文件所在目录；~ 会展开。
+
+[memory]
+workspace = "~/mindslice"
+mindslice = "mindslice"          # CLI；uv run 时来自本项目 venv（mindslice>=0.2.2）
+
+[paths]
+runs = "runs"                    # 每次运行一个目录，外加 latest.md
+state = "state.json"             # checkpoint、上次的 validate 问题、仓库 HEAD、上次全量扫描日期
+
+[dream]
+mode = "stage"                   # stage：所有写入暂存待审；direct：直接写入 @overlay（PLAN 第 7 节）
+full_sweep_days = 7              # 距上次全量新鲜度扫描满这么多天就触发一次全量扫描
+first_run_days = 1               # 还没有 checkpoint 时，只把最近这么多天的写入算作新写入（其余的由全量扫描覆盖）
+exclude_prefixes = ["invest/"]   # 由别的流程审阅的卡，dream 不碰（例如 news-agent 的 invest/*）
+
+# HEAD 变了就触发；这些路径也写进 input.json，供核对状态卡
+[watch]
+repos = []   # 例如 ["~/code/my-project", "~/code/my-other-project"]
+
+# {prompt} 换成渲染后的 prompt；resume 里的 {session_id} 换成会话 id
+[harness]
+timeout_minutes = 60
+cmd = ["agy", "--print={prompt}", "--model", "gemini-4-hydrogen-high", "--output-format", "json",
+       "--dangerously-skip-permissions", "--disable-slash-commands"]
+resume = "agy --conversation {session_id}"

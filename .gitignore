@@ -1,0 +1,8 @@
+runs/
+state.json
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+REPORT.md
+config.toml

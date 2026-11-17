@@ -1,0 +1,9 @@
+[Unit]
+Description=MindSlice-dream at 03:00 (system local time)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

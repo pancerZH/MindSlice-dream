@@ -1,0 +1,11 @@
+[Unit]
+Description=MindSlice-dream: nightly dream pass over a MindSlice workspace (gate -> agy session -> checks)
+
+[Service]
+Type=oneshot
+# @REPO@ is replaced by the repository's absolute path when the unit is installed (see README)
+WorkingDirectory=@REPO@
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/uv run mindslice-dream run
+TimeoutStartSec=90min
+Nice=10
