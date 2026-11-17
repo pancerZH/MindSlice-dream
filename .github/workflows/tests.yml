@@ -1,0 +1,37 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "30 6 * * 1"  # weekly, so a new mindslice release that breaks the dream shows up without a push
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    # Linux only: the dream runs from systemd user timers. The tests use a fake harness and fake mail,
+    # so they need no agy, LLM or Gmail account; they do need the mindslice CLI and git.
+    strategy:
+      fail-fast: false  # a failure with one dependency set should not hide the other
+      matrix:
+        deps: [locked, latest]  # uv.lock, and the newest mindslice that pyproject.toml allows
+    name: pytest (${{ matrix.deps }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install uv
+          if [ "${{ matrix.deps }}" = latest ]; then uv sync --upgrade; else uv sync --locked; fi
+      - name: Engine version
+        run: uv run --no-sync mindslice --version
+      - name: Tests
+        run: uv run --no-sync pytest -v
