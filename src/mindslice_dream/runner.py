@@ -15,9 +15,9 @@ PROMPT = ROOT / "prompts" / "dream.md"
 FORBIDDEN_EVENTS = {"baked", "discarded", "retired"}
 
 MODE_RULES = {
-    "stage": "`stage`。每次写入都加 `--stage`，改动进 staging/ 等用户审阅（带 `--also` 时只在这次调用上加）。"
+    "stage": "`stage`。`ms write` 会自动暂存（不用加 `--stage`），改动进 staging/ 等用户审阅。"
              "暂存的改动不会出现在 `ms read` 里，要看用 `ms --json diff`；再写同一张卡时，是在它的暂存版本上改。",
-    "direct": "`direct`。直接写入 @overlay，不加 `--stage`；用户 bake 时会审阅这些改动。",
+    "direct": "`direct`。直接写入 @overlay；用户 bake 时会审阅这些改动。",
 }
 
 
@@ -90,12 +90,12 @@ def dream(cfg: dict, force: bool) -> dict:
     input_path, report = run_dir / "input.json", run_dir / "report.md"
     input_path.write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prompt = session.render(PROMPT.read_text(encoding="utf-8"), date=task["date"], workspace=ws, input=input_path,
-                            report=report, ms=shlex.join([cfg["memory"]["mindslice"], "-w", str(ws)]),
+                            report=report, ms=shlex.join([str(run_dir / session.GUARD), "-w", str(ws)]),
                             mode_rule=MODE_RULES[mode], exclude="、".join(f"`{p}`" for p in exclude))
     (run_dir / "prompt.md").write_text(prompt, encoding="utf-8")
 
     started, t0 = session.now_iso(), time.time()
-    res = session.launch(cfg, run_dir, prompt)
+    res = session.launch(cfg, run_dir, prompt, write=True)
     events = gate.after(gate.history(ws), task["checkpoint"])
     after = gate.snapshot(cfg)
     problems, warnings = check(events, before, after, mode, exclude)

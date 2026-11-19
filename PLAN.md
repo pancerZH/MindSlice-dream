@@ -1,6 +1,6 @@
 # MindSlice-dream 设计 (PLAN.md)
 
-> 设计确定于 2026-11-16，2026-11-17 修订（决策 8–11）。
+> 设计确定于 2026-11-16，2026-11-17 修订（决策 8–11），2026-11-18 修订（决策 12）。
 > 本文件只放设计；实现记录和运行结果在本地的 REPORT.md（不进 git）。
 
 ## 1. 目标
@@ -27,6 +27,7 @@
    代价：会话后段做的更正没写回卡里，dream 发现不了。这类问题如果反复出现，再考虑加回对话回顾。
 10. 每次运行都要清理干净（2026-11-17）：运行结束后（包括超时），会话的临时文件和它留下的进程都清掉，记忆库以外不留下文件；运行目录只保留运行记录。
 11. 审阅走邮件（2026-11-17）：夜里有暂存的改动就发邮件，用户直接回复批准、放弃或修改，由 AI 解读回复、程序执行；修改后直接生效，确认邮件给出最终文本；运行失败或越界也发邮件。收件人只放用户自己的邮箱，用 plus 地址。细节见第 10 节。
+12. 只有一个正确答案的规则由程序执行，不靠 prompt（2026-11-18，沿用 news-agent 的做法）：会话拿到的 `mindslice` 是一层检查（guard），stage 模式下自动暂存每次写入，拒绝 delete、`--no-stage`、写 `invest/*`、不以 `[dream]` 开头的 reason，以及读记忆和 `write` 以外的命令；读回复的会话只能读。事后检查保留作兜底。细节见第 7 节。
 
 ## 3. 架构总览
 
@@ -40,7 +41,7 @@ systemd timer（每天 03:00）
             input.json：触发原因、新写入及其 reason、validate 新问题、HEAD 变化
        3. 一次 agy 会话（gemini-4-hydrogen-high）
             prompts/dream.md：新写入 → 新鲜度 → 结构 → 常驻层 → 报告
-            只通过 `mindslice` CLI 读写记忆；用 git / PyPI / CI / 测试核对事实
+            只通过 `mindslice` CLI 读写记忆（经 guard，第 7 节）；用 git / PyPI / CI / 测试核对事实
        4. 事后检查（纯脚本）
             本次运行期间的 history 事件是否越界；validate 是否新增 error
             通过 → 推进 checkpoint；不通过 → checkpoint 不动，下次重来
@@ -112,16 +113,22 @@ gate 决定运行后，脚本把本次任务写进 `input.json`：
 
 ## 7. 写入策略与安全边界
 
-prompt 中的硬规则：
+程序强制的规则（决策 12）：会话拿到的 `mindslice`（prompt 里的 `ms`）是运行目录里的 `bin/mindslice`，同时放在会话 PATH 的最前面。它就是 `guard.py`，用引擎自己的参数解析器读参数，这样缩写、选项顺序都和 CLI 的读法一致：
 
-- 只用 `mindslice write` 写入。每次写入都带 `--reason "[dream] <证据来源>"`；长正文用 `--content-file`。
+- 只放行读记忆的命令（read、search、manifest、validate、diff、history、status、explain）和 `write`；bake、apply、discard、review、mount、rollback 等一律拒绝。
+- `write`：拒绝 `--op delete`、`--no-stage`、写 `invest/*`（`exclude_prefixes`）、reason 不以 `[dream]` 开头；`--also` 文件里的每一项同样检查（没写 reason 的沿用这次调用的），`--also -` 不收。stage 模式下没带 `--stage` 的自动补上。
+- 被拒绝的调用不执行，返回码 2，stderr 说明原因；通过的原样交给配置的 CLI。
+- 读回复的会话（第 10 节）也拿到 guard，但只能读。
+- guard 防的是 agent 漏写参数，不防故意绕过：用 PATH 上别的 `mindslice`、`uv run mindslice`、`python -m mindslice` 或直接改文件都绕得过去，这些由事后检查兜底。
+
+prompt 中的规则：
+
+- 只用 `mindslice write` 写入。每次写入都带 `--reason "[dream] <证据来源>"`（前缀由 guard 检查，证据来源由 agent 判断）；长正文用 `--content-file`。
 - 改卡里的一部分（状态行、版本号、链接、个别语句）用 `--op patch --edit <旧文本> <新文本>`：只替换引用的文本，其余内容原样保留，不会因为漏写而丢语句。旧文本对不上（卡已被别的会话改过）就跳过，留到下次。
 - 用 patch 改写一整行时，只改过期的部分，旧行里仍然成立的细节原样留在新行里：引用的旧文本会整段换掉，漏写的内容就丢了。
 - 只有整卡重写才用 `replace`，并且一定带 `--if-match`，冲突就跳过，留到下次。
 - 涉及多张卡的改动用一次 `--also` 提交（见第 6 节第 3 步）。成员默认沿用这次调用的 `--reason`；成员自带 reason 时也必须以 `[dream]` 开头，否则 gate 和事后检查会把它当成其他会话的写入。
-- 不 delete，只用 patch / replace / append / supersede。
-- 不执行 bake、apply、discard、mount、rollback，也不用 `--no-stage`。
-- 不碰 `invest/*`，它归 news-agent 自己的审阅流程。
+- 被 guard 拒绝时按提示改正，不换别的命令或直接改文件绕过去。`invest/*` 归 news-agent 自己的审阅流程。
 - 证据不明确就不改，列进报告的"需要用户处理"。
 - 卡里或 reason 里没有证据支持的，不把建议升级成决定。
 - 记忆库以外只读，也不在仓库或其他目录里留下文件（决策 10）；临时文件只放在会话的工作目录里。
@@ -129,11 +136,11 @@ prompt 中的硬规则：
 写入模式（`config.toml` 的 `[dream] mode`，选哪个见第 13 节待定事项）：
 
 - `direct`：直接写入 @overlay。overlay 本来就是基础 slice 的暂存区，用户 bake 时的审阅就是人工把关点。
-- `stage`：所有写入都加 `--stage`，由用户用 `mindslice diff` 或 `/mindslice:review` 审阅。
+- `stage`：guard 给所有写入加上 `--stage`，由用户用审阅邮件、`mindslice diff` 或 `/mindslice:review` 审阅。
 
 两种模式都不做运行前的还原点（决策 8）。已 bake 的卡改的是 overlay 里的副本，原文仍在 slice 里；只在 overlay 里的卡在 `direct` 模式下被改错，旧文本就找不回了。这部分损失靠上面的规则限制：patch 只动引用的文本，replace 必须带 `--if-match`，不 delete。`stage` 模式下，overlay 在用户 apply 之前保持原样。
 
-事后检查由脚本完成，检查对象是本次运行期间的 history 事件，以及运行前后的 validate 结果：
+事后检查由脚本完成，是 guard 之外的兜底，检查对象是本次运行期间的 history 事件，以及运行前后的 validate 结果：
 
 | 发现 | 处理 |
 | :-- | :-- |
@@ -188,7 +195,8 @@ agy --print=<prompt> --model gemini-4-hydrogen-high --output-format json \
 
 会话环境：
 
-- 设 `MINDSLICE_PLUGIN_ISOLATE=1`。agy 自带的 MindSlice 插件会给每个会话注入记忆、提供 MCP 工具，用的是插件自带的引擎版本和它自己配置的工作区；隔离后它不注入、不提供工具，会话只能经 prompt 给出的 `ms`（绝对路径）读写记忆。这是插件 README 给 `agy -p` 嵌套会话的做法。
+- 设 `MINDSLICE_PLUGIN_ISOLATE=1`。agy 自带的 MindSlice 插件会给每个会话注入记忆、提供 MCP 工具，用的是插件自带的引擎版本和它自己配置的工作区；隔离后它不注入、不提供工具，会话只能经 prompt 给出的 `ms`（guard 的绝对路径）读写记忆。这是插件 README 给 `agy -p` 嵌套会话的做法。
+- 把运行目录的 `bin/`（里面只有 guard）放在 PATH 最前面，会话自己敲的 `mindslice` 也先到 guard。guard 的 shebang 是运行器自己的 Python（项目 venv，有本包和引擎）；它随运行目录的其他文件一起删掉。
 - 把 `MINDSLICE_WORKSPACE` 设为配置的工作区，漏写 `-w` 的命令也不会落到别的工作区。
 - 设 `MINDSLICE_DREAM_RUN=<运行目录>` 作为这次会话所有进程的标记，再设 `PYTHONDONTWRITEBYTECODE=1`，跑测试时不在仓库里留下字节码缓存。
 
@@ -244,6 +252,7 @@ MindSlice-dream/
     gate.py         触发判断与 input.json，读写 state.json
     runner.py       一次 dream：渲染 prompt、启动会话、事后检查、写 meta.json / report.md、发审阅邮件
     session.py      会话的环境、运行目录、结束后的清理，文件锁
+    guard.py        会话拿到的 mindslice：放行什么、拒绝什么（第 7 节）
     review.py       审阅邮件的内容、解读回复、执行决定、确认邮件（第 10 节）
     mail.py         SMTP / IMAP、Gmail 搜索、哪些回复算数（第 10 节）
   systemd/mindslice-dream.service  mindslice-dream.timer
@@ -252,8 +261,8 @@ MindSlice-dream/
 ```
 
 - Python 3.12+，代码只用标准库，与 MindSlice、Forge 一致。唯一的依赖是 `mindslice>=0.2.2`（第一个带 `op=patch`、`--also` 和多地址 `read` 的版本），让 `uv run` 用上这个 CLI。
-- 通过子进程调用 `mindslice` CLI，不 import 引擎内部代码。
-- 代码保持短小，判断逻辑放在 prompt 里。
+- 通过子进程调用 `mindslice` CLI，不 import 引擎内部代码。唯一的例外是 guard 用引擎 CLI 的参数解析器（`build_parser`），这样它和 CLI 对参数的读法完全一致；导入失败时会话的每次调用都失败，不会放行。
+- 代码保持短小，需要判断的放在 prompt 里；只有一个正确答案的规则放在程序里（决策 12）。
 - `--dry-run` 只跑 gate 和输入准备，打印 `input.json`，不启动 agy。
 
 ## 12. 验证方案
@@ -263,7 +272,8 @@ MindSlice-dream/
 全部使用 fake harness，不调用真实 LLM（参照 news-agent 的 `tests/fake_harness.py`）。测试在 `mindslice init` 建出的临时工作区上运行，不碰 `~/mindslice`。
 
 - gate：空闲时跳过；四种触发条件各自生效；旧的 validate 警告不会重复触发；`[dream]` 写入和 `invest/*` 写入既不触发，也不进 `input.json`；同一张卡的多次写入在 `input.json` 里合成一条。
-- 事后检查：能发现 delete、`invest/*` 写入、bake、未暂存的常驻卡改动；发现问题时 checkpoint 不推进；`patch` 事件和一次 `--also` 产生的多条事件按普通写入处理。
+- guard：读命令原样放行；stage 模式下补 `--stage`，direct 模式不补；拒绝 apply / bake、`--no-stage`（含缩写）、delete（含 `--also` 成员）、`invest/*`、非 `[dream]` reason、`--also -`；读回复的会话不能写。fake harness 不加 `--stage`，写入照样暂存。
+- 事后检查（fake harness 绕过 guard 调 PATH 上的下一个 CLI）：能发现 delete、`invest/*` 写入、bake、未暂存的常驻卡改动；发现问题时 checkpoint 不推进；`patch` 事件和一次 `--also` 产生的多条事件按普通写入处理。
 - 清理：运行目录只剩运行记录；会话留下的进程（包括另开会话的后台进程）在运行结束后被结束；超时时会话本身也被结束；上次中断留下的残留在下次运行开始时清掉。
 - 邮件审阅：用假的 Gmail（SMTP 投进一个邮箱，IMAP 照 Gmail 的格式返回，搜索不过滤）和假的解读会话测试。发信：有改动才发，列出编号和 diff，记下 Message-ID 和 sha256；运行失败也发；同样的改动不重发；从只读 slice 复制的卡，diff 不含引擎自动加的内容。回复：没有 `\Sent` 标签、发件人不对、不在线程里、转发给别人的都不处理；程序自己的邮件不算回复；同一封回复不处理两次；回复旧邮件只回说明。执行：修改先 patch 再 apply，最终文本进确认邮件；暂存版本变过的不执行；解读会话写了记忆或失败时什么都不执行；依赖的新卡没一起批准时留在待审。另外：没有待审时不连 IMAP，dream 运行时跳过。
 - 手动端到端（邮件）：在副本上暂存几处改动，`mail --send` 发一封真邮件，从账号回复，`mail` 取回复，看确认邮件和副本记忆库的变化。

@@ -7,6 +7,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ RUN_RECORD = {"input.json", "prompt.md", "stdout.log", "stderr.log", "report.md"
 STRIP_PREFIXES = ("ANTIGRAVITY_", "CLAUDE_CODE_", "CODEX_", "MINDSLICE_PLUGIN_", "PLUGIN_")
 STRIP_NAMES = {"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "AI_AGENT"}
 SESSION_KEYS = ("session_id", "conversation_id", "thread_id", "sessionId", "conversationId")
+GUARD = Path("bin") / "mindslice"  # in the run directory; the session's only mindslice (guard.py)
 
 
 def now_iso() -> str:
@@ -46,6 +48,18 @@ def clean_env(workspace: Path, tag: str) -> dict:
     # RUN tags every process of the session (see stop_leftovers); no bytecode caches are left in the repos it tests.
     return env | {"MINDSLICE_PLUGIN_ISOLATE": "1", "MINDSLICE_WORKSPACE": str(workspace),
                   "MINDSLICE_DREAM_RUN": tag, "PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def install_guard(cfg: dict, run_dir: Path, write: bool) -> None:
+    """The `mindslice` the session gets, first on its PATH and named in the dream prompt: guard.py run by this
+    Python, which has the package and the engine, then the configured CLI. Deleted with the run's other files."""
+    policy = {"cli": str(cfg["memory"]["mindslice"]), "write": write, "stage": cfg["dream"]["mode"] == "stage",
+              "exclude": list(cfg["dream"]["exclude_prefixes"])}
+    path = run_dir / GUARD
+    path.parent.mkdir()
+    path.write_text(f"#!{sys.executable}\nimport sys\n\nfrom mindslice_dream.guard import main\n\n"
+                    f"sys.exit(main(sys.argv[1:], {policy!r}))\n")
+    path.chmod(0o755)
 
 
 def tagged(tag: str) -> list[int]:
@@ -127,19 +141,22 @@ def final_text(output: str) -> str | None:
     return text
 
 
-def launch(cfg: dict, run_dir: Path, prompt: str, timeout_minutes: float | None = None) -> dict:
+def launch(cfg: dict, run_dir: Path, prompt: str, timeout_minutes: float | None = None, write: bool = False) -> dict:
     """One non-interactive harness session working in run_dir/work, with its output in stdout.log / stderr.log.
+    Its mindslice is the guard, which lets it write only when write is true.
 
     Afterwards, timed out or not, every process it left running is stopped and run_dir keeps only the run record."""
     h = cfg["harness"]
     work = run_dir / "work"
     work.mkdir()
+    install_guard(cfg, run_dir, write)
+    env = clean_env(cfg["memory"]["workspace"], str(run_dir))
+    env["PATH"] = os.pathsep.join([str((run_dir / GUARD).parent), env.get("PATH", "")])
     exit_code, status, proc = None, "ok", None
     with open(run_dir / "stdout.log", "w") as out, open(run_dir / "stderr.log", "w") as err:
         try:
-            proc = subprocess.Popen([a.replace("{prompt}", prompt) for a in h["cmd"]], cwd=work,
-                                    env=clean_env(cfg["memory"]["workspace"], str(run_dir)), stdin=subprocess.DEVNULL,
-                                    stdout=out, stderr=err)
+            proc = subprocess.Popen([a.replace("{prompt}", prompt) for a in h["cmd"]], cwd=work, env=env,
+                                    stdin=subprocess.DEVNULL, stdout=out, stderr=err)
             exit_code = proc.wait(timeout=(timeout_minutes or h["timeout_minutes"]) * 60)
         except subprocess.TimeoutExpired:
             status = "timeout"

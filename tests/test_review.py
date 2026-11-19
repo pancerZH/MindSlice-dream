@@ -191,6 +191,17 @@ def test_nothing_is_executed_when_the_reading_goes_wrong(cfg, ws, box, monkeypat
     assert note in text(box.received()[-1])
 
 
+def test_the_reading_session_cannot_write(cfg, ws, box, monkeypatch):
+    runner.run(cfg)
+    reply(box, box.received()[0], "全部批准")
+    reviewer(cfg, monkeypatch, {"n": 1, "action": "approve"}, {"n": 2, "action": "approve"}, mode="guarded")
+    review.poll(cfg)
+    run_dir = sorted(cfg["paths"]["runs"].glob("*-review"))[-1]
+    refused = json.loads((run_dir / "stdout.log").read_text())["refused"]
+    assert refused["code"] == 2 and "只能用读记忆的命令" in refused["stderr"]
+    assert staged(ws) == []  # nothing was written, so the decisions were carried out
+
+
 def test_a_reply_to_a_superseded_mail_gets_a_note(cfg, ws, box, monkeypatch):
     runner.run(cfg)
     old = box.received()[0]

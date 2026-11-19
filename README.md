@@ -2,7 +2,7 @@
 
 [中文](README-zh.md)
 
-A nightly "dream" for a MindSlice workspace (default `~/mindslice`). The script first checks whether there is anything to do tonight; if so, it starts one agy session that checks the memory cards against git, PyPI, CI and tests, corrects them, and tidies their structure. When the session ends, the script checks that it stayed within bounds, then emails you the staged changes for review; reply to the email to approve, discard or amend them. See [PLAN.md](PLAN.md) for the design and decisions.
+A nightly "dream" for a MindSlice workspace (default `~/mindslice`). The script first checks whether there is anything to do tonight; if so, it starts one agy session that checks the memory cards against git, PyPI, CI and tests, corrects them, and tidies their structure. The session's `mindslice` is guarded by the program (in stage mode it stages every write; it refuses deletes, apply and the like), and when the session ends, the script checks that it stayed within bounds, then emails you the staged changes for review; reply to the email to approve, discard or amend them. See [PLAN.md](PLAN.md) for the design and decisions.
 
 ## Install
 

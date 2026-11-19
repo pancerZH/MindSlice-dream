@@ -44,21 +44,43 @@ def test_ok_run_advances_the_checkpoint(cfg, ws):
     report = (cfg["paths"]["runs"] / "latest.md").read_text()
     assert report.startswith("# Dream 报告") and "## 脚本检查" in report and "checkpoint 已推进" in report
     prompt = (run_dir / "prompt.md").read_text()
-    assert "{{" not in prompt and f"-w {ws}" in prompt
-    # the harness's own MindSlice plugin is switched off; memory is reachable only through the configured workspace
+    guard = str(run_dir / session.GUARD)
+    assert "{{" not in prompt and f"`{guard} -w {ws}`" in prompt
+    # the harness's own MindSlice plugin is switched off; memory is reachable only through the configured workspace,
+    # and the session's mindslice is the guard, which staged the writes the session sent without --stage
     [seen] = session_output(meta)
     assert seen["cwd"] == str(run_dir / "work")
+    assert seen["ms"] == seen["path_mindslice"] == guard
     assert seen["env"] == {"MINDSLICE_PLUGIN_ISOLATE": "1", "MINDSLICE_WORKSPACE": str(ws), "PYTHONDONTWRITEBYTECODE": "1"}
 
 
+@pytest.mark.parametrize("mode, why", [
+    ("delete", "dream 不删除卡：projects/demo/status"),
+    ("invest", "invest/theses/x 由别的流程审阅，dream 不写"),
+    ("apply", "这个会话不能用 `mindslice apply`，只能用读记忆的命令和 `write`"),
+    ("nostage", "不能用 `--no-stage`"),
+    ("noreason", "projects/demo/status：reason 要以 `[dream]` 开头"),
+    ("alsodelete", "dream 不删除卡：projects/demo/notes"),
+])
+def test_the_guard_refuses_and_nothing_is_written(cfg, ws, monkeypatch, mode, why):
+    start = gate.history(ws)[-1]["event_id"]
+    monkeypatch.setenv("FAKE_DREAM", mode)
+    meta = runner.run(cfg)
+    assert meta["status"] == "ok" and meta["problems"] == []
+    [seen] = session_output(meta)
+    assert seen["refused"]["code"] == 2 and why in seen["refused"]["stderr"], seen["refused"]
+    events = gate.after(gate.history(ws), {"event_id": start})
+    assert [(e["event"], e["op"]) for e in events] == [("proposed", "patch"), ("proposed", "append"),
+                                                       ("proposed", "create")]  # only the default writes
+
+
 @pytest.mark.parametrize("mode, problem", [
-    ("delete", "dream 删除了卡片：proposed delete @overlay/projects/demo/status"),
-    ("invest", "dream 写了不归它管的卡：proposed create @overlay/invest/theses/x"),
-    ("apply", "不允许的操作：applied move @overlay/projects/demo/status"),
+    ("bypass", "stage 模式下未暂存的写入：applied append @overlay/projects/demo/status"),
+    ("bypassapply", "不允许的操作：applied move @overlay/projects/demo/status"),
     ("error", "validate 新增 error：error invalid_frontmatter @overlay/broken"),
-    ("nostage", "stage 模式下未暂存的写入：applied patch @overlay/projects/demo/status"),
 ])
 def test_guardrail_problems_keep_the_checkpoint(cfg, monkeypatch, mode, problem):
+    """What gets around the guard (another mindslice on PATH, a file written directly) the post-run checks still see."""
     monkeypatch.setenv("FAKE_DREAM", mode)
     meta = runner.run(cfg)
     assert meta["status"] == "guardrail problems" and not meta["advanced"]
@@ -80,7 +102,7 @@ def test_concurrent_write_is_a_warning_and_waits_for_the_next_run(cfg, monkeypat
     monkeypatch.setenv("FAKE_DREAM", "concurrent")
     meta = runner.run(cfg)
     assert meta["status"] == "ok" and meta["problems"] == []
-    assert meta["warnings"] == ["其他会话同时写入：proposed create @overlay/projects/demo/other"
+    assert meta["warnings"] == ["其他会话同时写入：applied create @overlay/projects/demo/other"
                                 "（reason: Another session recorded this.）"]
     t = gate.evaluate(cfg, gate.load_state(cfg["paths"]["state"]), gate.snapshot(cfg))
     assert [w["card"] for w in t["new_writes"]] == ["projects/demo/other"]

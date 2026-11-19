@@ -53,9 +53,7 @@
 
 ## 硬规则
 
-- 只用 `ms write` 写记忆。每次写入都带 `--reason '[dream] <证据来源>'`；`--also` 成员自带的 reason 也必须以 `[dream]` 开头。
-- 不删除卡（不用 `--op delete`）。
-- 不执行 bake、apply、discard、review、mount、unmount、rollback、restore，不用 `--no-stage`。
-- 不碰 {{exclude}} 下的卡，它们由别的流程审阅。
+- 只用 `ms write` 写记忆，每次写入都带 `--reason '[dream] <证据来源>'`。
+- `ms` 由程序把关：只放行读记忆的命令和 `write`；删除卡、`--no-stage`、写 {{exclude}} 下的卡（它们由别的流程审阅）、reason 不以 `[dream]` 开头（`--also` 成员也一样）都会被拒绝，这次调用不执行。被拒绝时按提示改正，不要换别的命令或直接改文件绕过去。
 - 证据不明确就不改，记进报告的"需要用户处理"。卡里或 reason 里没有证据支持的，不把建议升级成决定。
 - 记忆库以外只读：可以查 git、按第 2 步的条件重跑测试，但不改代码、不提交、不推送，也不在仓库或其他目录里留下文件。
