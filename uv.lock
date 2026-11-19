@@ -43,7 +43,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mindslice", specifier = ">=0.2.2" }]
+requires-dist = [{ name = "mindslice", specifier = ">=0.2.5" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]

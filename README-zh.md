@@ -7,7 +7,7 @@
 ## 安装
 
 ```bash
-uv sync                      # 依赖只有 mindslice>=0.2.2（op=patch、--also、多地址 read），CLI 装在 .venv 里
+uv sync                      # 依赖只有 mindslice>=0.2.5，CLI 装在 .venv 里
 cp config.example.toml config.toml   # 再改 workspace、watch.repos 等；config.toml 只在本机，不进 git
 uv run pytest                # fake harness，不调用真实 LLM，不碰 ~/mindslice
 ```

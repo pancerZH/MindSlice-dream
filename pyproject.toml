@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 # The code uses only the standard library and calls the engine's CLI; the dependency puts a CLI with
 # write op=patch, --also and multi-address read (0.2.2) into the venv that `uv run` uses.
 dependencies = [
-    "mindslice>=0.2.2",
+    "mindslice>=0.2.5",
 ]
 
 [dependency-groups]
