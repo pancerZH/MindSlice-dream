@@ -101,7 +101,8 @@ def dream(cfg: dict, force: bool) -> dict:
     input_path.write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prompt = session.render(PROMPT.read_text(encoding="utf-8"), date=task["date"], workspace=ws, input=input_path,
                             report=report, ms=shlex.join([str(run_dir / session.GUARD), "-w", str(ws)]),
-                            mode_rule=MODE_RULES[mode], exclude="、".join(f"`{p}`" for p in exclude))
+                            mode_rule=MODE_RULES[mode], exclude="、".join(f"`{p}`" for p in exclude),
+                            max_chars=cfg["dream"]["max_card_chars"])
     (run_dir / "prompt.md").write_text(prompt, encoding="utf-8")
 
     started, t0, repos = session.now_iso(), time.time(), repo_states(cfg["repos"])

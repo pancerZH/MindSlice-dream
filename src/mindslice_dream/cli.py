@@ -31,6 +31,7 @@ def load_config(path: Path) -> dict:
     mem["mindslice"] = found
     cfg["paths"] = {k: resolve(v) for k, v in cfg["paths"].items()}
     cfg["repos"] = [resolve(r) for r in cfg["watch"]["repos"]]
+    cfg["dream"].setdefault("max_card_chars", 5000)  # configs written before the setting existed
     cfg.setdefault("mail", {"to": ""})  # no [mail] section: no review mails
     if "account" in cfg["mail"]:
         cfg["mail"]["account"] = resolve(cfg["mail"]["account"])

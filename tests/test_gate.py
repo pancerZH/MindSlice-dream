@@ -84,6 +84,23 @@ def test_force(cfg):
     assert task(cfg, force=True)["triggers"] == ["force"]
 
 
+def test_oversized_cards_are_listed_on_full_sweeps_and_when_newly_written(cfg, ws):
+    cfg["dream"]["max_card_chars"] = 300
+    log = "\n".join(f"- Release {i}: tagged, published and installed." for i in range(10))
+    ms(ws, "write", "projects/demo/log", "--title", "Log", "--summary", "Releases.", "--content", log, "--reason", "made")
+    ms(ws, "write", "invest/theses/long", "--title", "L", "--summary", "L.", "--content", log, "--tag", "invest",
+       "--reason", "news-agent run")
+    ms(ws, "bake", "@demo", "--prefix", "projects/")  # the slice copy and the @overlay copy share one path
+    ms(ws, "write", "projects/demo/log", "--op", "append", "--content", "- Release 10.", "--reason", "more")
+    t = task(cfg)  # first run: a full sweep
+    assert t["oversized"] == [{"card": "projects/demo/log", "chars": len("Releases.\n\n" + log + "\n- Release 10."),
+                               "bullets": 11}]
+    settle(cfg)
+    assert task(cfg)["oversized"] == []  # no full sweep and not written since
+    ms(ws, "write", "projects/demo/log", "--op", "append", "--content", "- Release 11.", "--reason", "again")
+    assert [c["card"] for c in task(cfg)["oversized"]] == ["projects/demo/log"]
+
+
 def test_deleted_cards_are_not_listed(cfg, ws):
     settle(cfg)
     ms(ws, "write", "projects/demo/other", "--title", "O", "--summary", "O.", "--content", "- o", "--reason", "made")

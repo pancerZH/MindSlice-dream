@@ -1,6 +1,7 @@
 """The gate: decide without an LLM whether tonight needs a dream session, and what it should look at."""
 
 import json
+import re
 import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -72,6 +73,32 @@ def snapshot(cfg: dict) -> dict:
     }
 
 
+FRONTMATTER = re.compile(r"(\+\+\+|---)\n.*?\n\1\n", re.S)
+
+
+def oversized(cfg: dict) -> list[dict]:
+    """Cards whose body (summary and statements, without frontmatter) is longer than max_card_chars, the largest first.
+    Only the card that wins at each path counts, so a slice card already copied into @overlay is not listed twice."""
+    ws, limit = cfg["memory"]["workspace"], cfg["dream"]["max_card_chars"]
+    exclude = tuple(cfg["dream"]["exclude_prefixes"])
+    mounts = mindslice_json(cfg, "manifest", "--limit", "1000", "--max-folders", "0", "--no-always")["mounts"]
+    seen, found = set(), []
+    for mount in sorted(mounts, key=lambda m: -m["precedence"]):
+        root = ws / mount["path"]
+        for file in sorted(root.rglob("*.md")):
+            rel = file.relative_to(root)
+            path = rel.with_suffix("").as_posix()
+            if path in seen or path == "overview" or any(part.startswith(".") for part in rel.parts):
+                continue
+            seen.add(path)
+            text = file.read_text(encoding="utf-8")
+            body = (text[m.end():] if (m := FRONTMATTER.match(text)) else text).strip()
+            if len(body) > limit and not path.startswith(exclude):
+                found.append({"card": path, "chars": len(body),
+                              "bullets": sum(line.startswith("- ") for line in body.splitlines())})
+    return sorted(found, key=lambda c: -c["chars"])
+
+
 def head(repo: Path) -> str | None:
     res = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True)
     return res.stdout.strip() if res.returncode == 0 else None
@@ -110,6 +137,8 @@ def evaluate(cfg: dict, state: dict, snap: dict, force: bool = False, now: datet
 
     last_sweep = state.get("last_full_sweep")
     full_sweep = not last_sweep or (now.date() - date.fromisoformat(last_sweep)).days >= dream["full_sweep_days"]
+    # every oversized card on a full-sweep night, otherwise only the ones written since the last run
+    large = [c for c in oversized(cfg) if full_sweep or c["card"] in writes]
 
     hits = {"new_writes": bool(writes), "validate": bool(new_issues), "repo_head": any(r["changed"] for r in repos),
             "full_sweep": full_sweep, "force": force}
@@ -121,6 +150,7 @@ def evaluate(cfg: dict, state: dict, snap: dict, force: bool = False, now: datet
         "full_sweep": full_sweep,
         "new_writes": [{"card": path, "writes": w} for path, w in writes.items()],
         "validate_new": new_issues,
+        "oversized": large,
         "repos": repos,
         "checkpoint": position(events, checkpoint),
     }
