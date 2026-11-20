@@ -270,3 +270,53 @@ def test_gmail_labels_are_unquoted():
     prefix = b'12 (X-GM-LABELS (\\Inbox "\\\\Sent" "a (b)") UID 5 BODY[HEADER] {3}'
     assert mail.labels(prefix) == {"\\Inbox", "\\Sent", "a (b)"}
     assert mail.mailbox("Me <Me+dream@Example.com>") == "me@example.com"
+
+
+def test_execute_rechecks_the_mailed_version_under_lock(cfg, ws):
+    card = "projects/demo/target"
+    ms(ws, "write", card, "--summary", "Version A", "--stage", "--reason", "[dream] first")
+    [item], _ = review.staged_items(cfg)
+    record = {"n": 1, "id": card, "sha256": item["sha256"], "state": "pending"}
+    ms(ws, "write", card, "--op", "replace", "--summary", "Version B", "--stage", "--reason", "[dream] later")
+    for action in ("approve", "discard", "modify"):
+        result = review.execute(cfg, {"items": [record]}, [{"n": 1, "action": action}], {card: item["sha256"]})
+        assert result[1][0] == "skipped" and staged(ws) == [card]
+
+
+def test_receipt_retries_after_smtp_failure_without_replaying_reply(cfg, ws, box, monkeypatch):
+    runner.run(cfg)
+    reply(box, box.received()[0], "全部批准")
+    reviewer(cfg, monkeypatch, {"n": 1, "action": "approve"}, {"n": 2, "action": "approve"})
+    with monkeypatch.context() as m:
+        def offline(*args):
+            raise OSError("offline")
+        m.setattr(mail, "send", offline)
+        with pytest.raises(OSError, match="offline"):
+            review.poll(cfg)
+    assert staged(ws) == []
+    assert gate.load_state(cfg["paths"]["state"])["mail"]["outbox"]
+    review.poll(cfg)
+    assert "已生效" in text(box.received()[-1])
+    assert "outbox" not in gate.load_state(cfg["paths"]["state"])["mail"]
+
+
+def test_switching_qualified_link_targets_is_visible(cfg, ws):
+    card = "projects/demo/links"
+    ms(ws, "write", card, "--summary", "Links.", "--content", "See [[@first/topic]].")
+    ms(ws, "write", card, "--op", "replace", "--content", "See [[@second/topic]].", "--stage", "--reason", "[dream] update")
+    [it], _ = review.staged_items(cfg)
+    assert it["diff"] == ["-See [[@first/topic]].", "+See [[@second/topic]]."]
+
+
+def test_two_missing_dependencies_on_one_card_stay_pending(cfg, ws):
+    for card in ("one", "two"):
+        ms(ws, "write", card, "--summary", card, "--stage", "--reason", "[dream] base")
+    ms(ws, "write", "three", "--summary", "Depends on both.", "--extends", "@overlay/one",
+       "--extends", "@overlay/two", "--stage", "--reason", "[dream] dependent")
+    items, _ = review.staged_items(cfg)
+    records = [dict(it, n=n, state="pending") for n, it in enumerate(items, 1)]
+    child = next(it for it in records if it["id"] == "three")
+    outcome, detail = review.execute(cfg, {"items": records}, [{"n": child["n"], "action": "approve"}],
+                                     {it["id"]: it["sha256"] for it in items})[child["n"]]
+    assert outcome == "pending" and "@overlay/one" in detail and "@overlay/two" in detail
+    assert len(staged(ws)) == 3

@@ -6,6 +6,8 @@ import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from mindslice.storage.fsutil import atomic_write_text
+
 # reasons of the dream session's writes and of the patches the email review makes for the user: neither triggers a run
 DREAM_PREFIXES = ("[dream]", "[dream-review]")
 
@@ -171,4 +173,4 @@ def load_state(path: Path) -> dict:
 
 def save_state(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(state, ensure_ascii=False, indent=2) + "\n")

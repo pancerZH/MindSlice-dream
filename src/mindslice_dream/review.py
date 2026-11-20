@@ -1,17 +1,20 @@
 """Review by email (PLAN section 10): mail the dream's staged changes, read the user's reply, carry it out.
 
 One harness session reads the reply and only answers with decisions; the program checks them, executes them through
-the mindslice CLI (patch --stage, apply, discard) and confirms in the same mail thread."""
+the engine's workspace lock and revision-checked review and confirms in the same mail thread."""
 
 import difflib
 import html
 import json
 import re
-import subprocess
 import tomllib
 from collections import Counter
 from datetime import datetime, timezone
+from email import message_from_string, policy
 from pathlib import Path
+
+from mindslice import MindSliceError, Workspace
+from mindslice.operations.writer import fork_seed
 
 from . import gate, mail, session
 
@@ -29,19 +32,6 @@ HOWTO = """直接回复这封邮件，写明编号和怎么处理，例如：
 SUPERSEDED = "这封审阅邮件已经被更新的一封取代：{subject}。这次回复里的决定没有执行，请回复最新那封。"
 
 
-def ms(cfg: dict, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([cfg["memory"]["mindslice"], "-w", str(cfg["memory"]["workspace"]), "--json", *args],
-                          capture_output=True, text=True, stdin=subprocess.DEVNULL)
-
-
-def failure(res: subprocess.CompletedProcess) -> dict:
-    """The engine's error ({"message", "details"}; with --json it is on stderr), or the raw output."""
-    try:
-        return json.loads(res.stderr)
-    except json.JSONDecodeError:
-        return {"message": (res.stderr or res.stdout).strip()}
-
-
 def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -55,16 +45,12 @@ def parse_card(text: str) -> tuple[dict, list[str]]:
     return tomllib.loads(front), body.strip().splitlines()
 
 
-def unqualify(line: str) -> str:
-    return re.sub(r"\[\[@[\w.-]+/", "[[", line)
-
-
 def mount_dirs(ws: Path) -> dict[str, Path]:
     mounts = tomllib.loads((ws / "mounts.toml").read_text(encoding="utf-8")).get("mounts", [])
     return {m["alias"]: (ws / m["path"]).resolve() for m in mounts}
 
 
-def card_diff(ws: Path, item: dict) -> tuple[str, list[str], int]:
+def card_diff(ws: Path, item: dict, catalogs) -> tuple[str, list[str], int]:
     """How a staged card differs from the live one: (where it comes from, changed lines, lines whose only change is
     a link the engine qualified with a slice prefix when it copied the card into @overlay)."""
     rel = item["id"]
@@ -78,7 +64,9 @@ def card_diff(ws: Path, item: dict) -> tuple[str, list[str], int]:
         elif origin:
             alias = origin.split("/", 1)[0]
             source = f"从 {alias} 复制并修改"
-            base, old = parse_card((mount_dirs(ws)[alias] / f"{rel}.md").read_text(encoding="utf-8"))
+            raw = (mount_dirs(ws)[alias] / f"{rel}.md").read_text(encoding="utf-8")
+            base, old = parse_card(raw)
+            _, qualified = parse_card(fork_seed(raw, origin, catalogs))
         else:
             source, base, old = "新卡", {}, []
     except (OSError, KeyError, ValueError):  # a staged delete, a slice mounted from an archive, ...
@@ -92,7 +80,7 @@ def card_diff(ws: Path, item: dict) -> tuple[str, list[str], int]:
             lines += [f"- {k}: {json.dumps(was, ensure_ascii=False)}"] if was else []
             lines += [f"+ {k}: {json.dumps(now, ensure_ascii=False)}"] if now else []
     folded = 0
-    matcher = difflib.SequenceMatcher(a=[unqualify(x) for x in old], b=[unqualify(x) for x in new], autojunk=False)
+    matcher = difflib.SequenceMatcher(a=qualified if origin else old, b=new, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             folded += sum(a != b for a, b in zip(old[i1:i2], new[j1:j2]))
@@ -104,15 +92,20 @@ def card_diff(ws: Path, item: dict) -> tuple[str, list[str], int]:
 def staged_items(cfg: dict) -> tuple[list[dict], int]:
     """The dream's pending changes in staging, one per card, and the number of other pending changes."""
     ws = cfg["memory"]["workspace"]
-    pending = gate.mindslice_json(cfg, "diff")["items"]
+    with Workspace(ws) as engine, engine._reading():
+        return _staged_items(ws, engine.diff()["items"], engine.index.catalogs())
+
+
+def _staged_items(ws, pending, catalogs):
     items = []
     for it in pending:
         reasons = [c.get("reason") or "" for c in it.get("changes", [])]
-        if not all(r.startswith(gate.DREAM_PREFIXES) for r in reasons):
+        if not reasons or not all(r.startswith(gate.DREAM_PREFIXES) for r in reasons):
             continue  # staged by another flow (news-agent's invest/*, a session's change to an always-loaded card)
-        source, diff, folded = card_diff(ws, it)
+        source, diff, folded = card_diff(ws, it, catalogs)
         refs = it.get("references", {})
         items.append({"id": it["id"], "address": it["address"], "sha256": it["staged_sha256"],
+                      "change_ids": it.get("change_ids", []), "text": staged_text(ws, it["id"]),
                       "create": it["change"] == "create", "source": source, "reasons": list(dict.fromkeys(reasons)),
                       "diff": diff, "folded": folded, "refs": refs.get("extends", []) + refs.get("supersedes", [])})
     return items, len(pending) - len(items)
@@ -189,8 +182,8 @@ def notify(cfg: dict, run_id: str, status: str, report: Path | None, force: bool
         state = gate.load_state(cfg["paths"]["state"])
         box = state.setdefault("mail", {})
         current = box.get("review")
-        mailed = [(i["id"], i["sha256"]) for i in (current or {}).get("items", []) if i["state"] == "pending"]
-        if status == "ok" and (not items or (not force and [(i["id"], i["sha256"]) for i in items] == mailed)):
+        mailed = [(i["id"], i["sha256"], i.get("change_ids")) for i in (current or {}).get("items", []) if i["state"] == "pending"]
+        if status == "ok" and (not items or (not force and [(i["id"], i["sha256"], i["change_ids"]) for i in items] == mailed)):
             return "not needed"
         text = report.read_text(encoding="utf-8") if report and report.exists() else ""
         subject, body, page = review_mail(run_id, status, items, others, text)
@@ -203,7 +196,8 @@ def notify(cfg: dict, run_id: str, status: str, report: Path | None, force: bool
             box["superseded"] = (box.get("superseded", []) + [current["message_id"]])[-30:]
         box["review"] = {"message_id": str(msg["Message-ID"]), "subject": subject, "run_id": run_id,
                          "sent": session.now_iso(),
-                         "items": [{"n": n, "id": it["id"], "sha256": it["sha256"], "state": "pending"}
+                         "items": [{"n": n, "id": it["id"], "sha256": it["sha256"], "change_ids": it["change_ids"],
+                                    "state": "pending"}
                                    for n, it in enumerate(items, 1)]}
         gate.save_state(cfg["paths"]["state"], state)
     return f"sent: {subject}"
@@ -234,13 +228,21 @@ def waiting(cfg: dict) -> bool:
 def poll(cfg: dict) -> list[str]:
     """The mail timer: carry out the user's replies to the current review mail; returns log lines. With nothing left
     to review it returns at once, without connecting to the mail server."""
-    if not cfg["mail"]["to"] or not waiting(cfg):
+    if not cfg["mail"]["to"]:
+        return []
+    if "outbox" not in gate.load_state(cfg["paths"]["state"]).get("mail", {}) and not waiting(cfg):
         return []
     with session.locked(cfg, wait=False) as free:
         if not free:
             return ["dream 正在运行，这一轮跳过"]
         state = gate.load_state(cfg["paths"]["state"])
-        box = state["mail"]
+        box = state.get("mail", {})
+        if receipt := box.get("outbox"):
+            mail.send(cfg, message_from_string(receipt, policy=policy.default))
+            del box["outbox"]
+            gate.save_state(cfg["paths"]["state"], state)
+        if not waiting(cfg):
+            return []
         review = box["review"]
         days = (datetime.now(timezone.utc) - datetime.fromisoformat(review["sent"])).days + 2
         lines = []
@@ -256,8 +258,11 @@ def poll(cfg: dict) -> list[str]:
             else:
                 continue  # another thread that matched the search
             box["handled"] = (box.get("handled", []) + [str(msg["Message-ID"]).strip()])[-200:]
+            box["outbox"] = answer.as_string()
             gate.save_state(cfg["paths"]["state"], state)  # before the answer goes out: no reply is executed twice
             mail.send(cfg, answer)
+            del box["outbox"]
+            gate.save_state(cfg["paths"]["state"], state)
             lines.append(line)
         return lines
 
@@ -287,7 +292,7 @@ def handle(cfg: dict, review: dict, msg) -> tuple:
         actual = i["state"] != "pending" or (it is not None and it["sha256"] == i["sha256"])
         items.append({"n": i["n"], "card": i["id"], "state": i["state"] if actual else "changed",
                       "diff": "\n".join(it["diff"]) if it else "",
-                      "staged": staged_text(ws, i["id"]) if actual and i["state"] == "pending" else ""})
+                      "staged": it["text"] if actual and i["state"] == "pending" else ""})
     write_json(run_dir / "input.json", {"reply": mail.reply_text(msg), "items": items})
     prompt = session.render(PROMPT.read_text(encoding="utf-8"), input=run_dir / "input.json")
     (run_dir / "prompt.md").write_text(prompt, encoding="utf-8")
@@ -314,19 +319,17 @@ def handle(cfg: dict, review: dict, msg) -> tuple:
     return mail.compose(cfg, f"Re: {review['subject']}", text, reply_to=msg), line
 
 
-def modify(cfg: dict, item: dict, edits, quote) -> str | None:
+def modify(engine: Workspace, item: dict, edits, quote) -> str | None:
     """The user's change, as a patch on the staged version; the item follows the new version. Returns why it failed."""
-    if not edits or not all(isinstance(e, dict) and isinstance(e.get("old"), str) and isinstance(e.get("new"), str)
+    if not isinstance(edits, list) or not edits or not all(isinstance(e, dict) and isinstance(e.get("old"), str) and isinstance(e.get("new"), str)
                             for e in edits):
         return "解读结果里没有可执行的替换"
-    if any(t.startswith("-") and not re.search(r"\s", t) for e in edits for t in (e["old"], e["new"])):
-        return "替换的文本以 - 开头又没有空格，命令行传不进去"
     reason = f"{REVIEW_PREFIX} 用户回复审阅邮件：{' '.join(str(quote or '').split())[:200]}"
-    edit_args = [a for e in edits for a in ("--edit", e["old"], e["new"])]
-    res = ms(cfg, "write", item["id"], "--op", "patch", *edit_args, "--stage", "--reason", reason)
-    if res.returncode:
-        return failure(res).get("message") or "写入失败"
-    item["sha256"] = json.loads(res.stdout)["sha256"]
+    try:
+        result = engine.write(item["id"], op="patch", edits=edits, stage=True, reason=reason, if_match=item["sha256"])
+    except MindSliceError as exc:
+        return str(exc)
+    item["sha256"] = result["sha256"]
     return None
 
 
@@ -341,23 +344,39 @@ def conflict_text(conflict: dict, numbers: dict[str, int]) -> str:
 def execute(cfg: dict, review: dict, decided: list, staged: dict[str, str]) -> dict[int, tuple[str, str]]:
     """Carry out the decisions on the items of this mail whose staged version is still the one mailed (or the one an
     earlier reply's modification left). Returns {n: (outcome, detail)} for every item the decisions name."""
+    with Workspace(cfg["memory"]["workspace"]) as engine, engine.lock.exclusive():
+        snapshot = engine.diff()
+        current = {it["id"]: it for it in snapshot["items"]}
+        matched = {}
+        for item in review["items"]:
+            card = item["id"]
+            if card in staged and card in current and current[card]["staged_sha256"] == staged[card]:
+                if "change_ids" not in item or current[card].get("change_ids", []) == item["change_ids"]:
+                    matched[card] = staged[card]
+        return _execute_locked(engine, review, decided, matched)
+
+
+def _execute_locked(engine, review, decided, staged):
     by_n = {i["n"]: i for i in review["items"]}
     results, approve, discard, modified = {}, {}, {}, set()
+    counts = Counter(d["n"] for d in decided if isinstance(d, dict) and type(d.get("n")) is int)
     for d in decided:
-        item = by_n.get(d.get("n")) if isinstance(d, dict) else None
+        item = by_n.get(d["n"]) if isinstance(d, dict) and type(d.get("n")) is int else None
         if item is None:
             continue
         n, action = item["n"], d.get("action")
         if item["state"] != "pending":
             results[n] = ("skipped", f"之前的回复已经处理过（{OUTCOMES[item['state']]}）")
-        elif staged.get(item["id"]) != item["sha256"]:
+        elif counts[n] > 1:
+            results[n] = ("skipped", "同一编号出现多个决定，请重新回复")
+        elif item["id"] not in staged or staged[item["id"]] != item["sha256"]:
             results[n] = ("skipped", "发信后暂存版本变过，或者已在别处处理，请以最新的审阅邮件为准")
         elif action == "approve":
             approve[item["id"]] = n
         elif action == "discard":
             discard[item["id"]] = n
         elif action == "modify":
-            if error := modify(cfg, item, d.get("edits"), d.get("quote")):
+            if error := modify(engine, item, d.get("edits"), d.get("quote")):
                 results[n] = ("pending", f"没改成：{error}")
             else:
                 approve[item["id"]] = n
@@ -366,22 +385,30 @@ def execute(cfg: dict, review: dict, decided: list, staged: dict[str, str]) -> d
             results[n] = ("pending", str(d.get("note") or ""))
 
     numbers = {i["id"]: i["n"] for i in review["items"]}
-    while approve:  # in one call: the engine refuses (and applies nothing) if a card's reference would not resolve
-        res = ms(cfg, "apply", *approve)
-        if res.returncode == 0:
-            results |= {n: ("modified" if n in modified else "applied", "") for n in approve.values()}
+    snapshot = engine.diff()
+    revision = snapshot["revision"]
+    for it in snapshot["items"]:
+        n = numbers.get(it["id"])
+        if n in modified:
+            by_n[n]["change_ids"] = it.get("change_ids", [])
+    while approve or discard:
+        try:
+            engine.review(list(approve), list(discard), revision=revision)
+        except MindSliceError as exc:
+            held = {}
+            for conflict in exc.details.get("conflicts", []):
+                path = gate.card_path(conflict.get("address") or "")
+                if path in approve:
+                    held.setdefault(path, []).append(conflict_text(conflict, numbers))
+            if not held:
+                results.update((n, ("pending", str(exc))) for n in [*approve.values(), *discard.values()])
+                break
+            for path, details in held.items():
+                results[approve.pop(path)] = ("pending", "没生效：" + "；".join(details))
+        else:
+            results.update((n, ("modified" if n in modified else "applied", "")) for n in approve.values())
+            results.update((n, ("discarded", "")) for n in discard.values())
             break
-        err = failure(res)
-        held = [c for c in err.get("details", {}).get("conflicts", []) if gate.card_path(c.get("address", "")) in approve]
-        if not held:
-            results |= {n: ("pending", f"没生效：{err.get('message')}") for n in approve.values()}
-            break
-        for c in held:
-            results[approve.pop(gate.card_path(c["address"]))] = ("pending", "没生效：" + conflict_text(c, numbers))
-    if discard:
-        res = ms(cfg, "discard", *discard)
-        outcome = ("discarded", "") if res.returncode == 0 else ("pending", f"没放弃成：{failure(res).get('message')}")
-        results |= {n: outcome for n in discard.values()}
     for n, (outcome, _) in results.items():
         if outcome in HANDLED:
             by_n[n]["state"] = outcome
