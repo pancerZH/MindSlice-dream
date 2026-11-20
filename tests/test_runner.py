@@ -78,9 +78,12 @@ def test_the_guard_refuses_and_nothing_is_written(cfg, ws, monkeypatch, mode, wh
     ("bypass", "stage 模式下未暂存的写入：applied append @overlay/projects/demo/status"),
     ("bypassapply", "不允许的操作：applied move @overlay/projects/demo/status"),
     ("error", "validate 新增 error：error invalid_frontmatter @overlay/broken"),
+    ("repofile", "仓库在运行期间变了"),
+    ("repocommit", "仓库在运行期间变了"),
 ])
 def test_guardrail_problems_keep_the_checkpoint(cfg, monkeypatch, mode, problem):
-    """What gets around the guard (another mindslice on PATH, a file written directly) the post-run checks still see."""
+    """What gets around the guard (another mindslice on PATH, a file written directly, a change in a watched repo) the
+    post-run checks still see."""
     monkeypatch.setenv("FAKE_DREAM", mode)
     meta = runner.run(cfg)
     assert meta["status"] == "guardrail problems" and not meta["advanced"]

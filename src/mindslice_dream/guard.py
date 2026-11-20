@@ -1,6 +1,7 @@
 """The only `mindslice` a harness session gets (PLAN section 7): rules with one right answer are kept by the program,
 not by the prompt. Read commands pass; `write` passes only in the dream session, staged in stage mode, never a delete
-or --no-stage, with a `[dream]` reason and outside the excluded cards, --also members included. What passes runs the
+or --no-stage, with a `[dream]` reason, outside the excluded cards and with --if-match on a replace, --also members
+included. What passes runs the
 real CLI unchanged, plus --stage. The post-run checks stay as a backstop for what this cannot see (another CLI, files)."""
 
 import json
@@ -29,7 +30,7 @@ def command(argv: list[str], policy: dict) -> list[str]:
         raise Refused(f"这个会话不能用 `mindslice {args.command}`，只能用{allowed}")
     if args.stage is False:
         raise Refused("不能用 `--no-stage`")
-    writes = [{"id": args.id, "op": args.op, "reason": args.reason}]
+    writes = [{"id": args.id, "op": args.op, "reason": args.reason, "if_match": args.if_match}]
     if args.also == "-":
         raise Refused("`--also` 要给 JSON 文件，不能用 `-`")
     if args.also:
@@ -48,6 +49,8 @@ def command(argv: list[str], policy: dict) -> list[str]:
             raise Refused(f"{path} 由别的流程审阅，dream 不写")
         if not str(w.get("reason") or "").startswith("[dream]"):
             raise Refused(f"{path}：reason 要以 `[dream]` 开头，后面写证据来源")
+        if w.get("op") == "replace" and not w.get("if_match"):
+            raise Refused(f"{path}：replace 要带读卡时拿到的 sha256（`--if-match`，`--also` 成员写 `if_match`）")
     return [*argv, "--stage"] if policy["stage"] and args.stage is None else argv
 
 

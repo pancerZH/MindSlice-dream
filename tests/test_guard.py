@@ -38,6 +38,7 @@ def test_stage_mode_stages_every_write():
     (["write", "projects/x", "--content", "- x"], "reason 要以 `[dream]` 开头"),
     (["write", "projects/x", "--content", "- x", "--reason", "[dream-review] x"], "reason 要以 `[dream]` 开头"),
     (["write", "projects/x", "--content", "- x", "--also", "-", *DREAM], "不能用 `-`"),
+    (["write", "projects/x", "--op", "replace", "--content", "- x", *DREAM], "projects/x：replace 要带"),
 ])
 def test_refused(argv, why):
     assert why in refused(argv)
@@ -52,6 +53,7 @@ def test_a_read_only_session_cannot_write():
     ([{"id": "invest/watchlist", "op": "patch", "edits": []}], "invest/watchlist 由别的流程审阅"),
     ([{"id": "projects/y", "op": "append", "content": "- y", "reason": "another"}], "projects/y：reason"),
     ([{"id": "projects/y", "op": "append", "content": "- y", "reason": None}], "projects/y：reason"),
+    ([{"id": "projects/y", "op": "replace", "content": "- y"}], "projects/y：replace 要带"),
     ({"id": "projects/y"}, "要是 JSON 列表"),
 ])
 def test_also_members_are_checked(tmp_path, members, why):
@@ -67,6 +69,14 @@ def test_also_members_take_the_calls_reason(tmp_path):
     assert guard.command(argv, STAGE) == [*argv, "--stage"]
     batch.write_text("not json")
     assert "读不了 `--also` 文件" in refused(argv)
+
+
+def test_a_replace_with_if_match_passes(tmp_path):
+    batch = tmp_path / "batch.json"
+    batch.write_text(json.dumps([{"id": "projects/y", "op": "replace", "content": "- y", "if_match": "abc"}]))
+    argv = ["write", "projects/x", "--op", "replace", "--content-file", "x.md", "--if-match", "def", "--also", str(batch),
+            *DREAM]
+    assert guard.command(argv, STAGE) == [*argv, "--stage"]
 
 
 def test_main_reports_a_refusal(capsys):

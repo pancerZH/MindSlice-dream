@@ -6,7 +6,7 @@ and leaves a stray file in the run directory. FAKE_DREAM changes that:
 - delete | invest | apply | nostage | noreason | alsodelete: a call the guard refuses (what it said is in "refused");
 - bypass | bypassapply | always | concurrent | error: what only the post-run checks see: a call to another mindslice
   on PATH (an unstaged write; apply; --no-stage to an always-loaded card; another session's write) or a broken file
-  written directly;
+  written directly; repofile | repocommit: a file left in a watched repo, or a commit there;
 - noreport | answer | fail | sleep | straggler.
 """
 
@@ -78,6 +78,13 @@ elif mode == "always":
     write("prefs/p", "--op", "append", "--content", "- Also be kind.", "--no-stage", cli=other)
 elif mode == "straggler":  # a background process in its own session, still running when the session ends
     seen["straggler"] = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True).pid
+elif mode in ("repofile", "repocommit"):
+    repo = task["repos"][0]["path"]
+    Path(repo, "left.txt").write_text("left behind")
+    if mode == "repocommit":
+        subprocess.run(["git", "-C", repo, "add", "left.txt"], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x"],
+                       check=True)
 elif mode == "concurrent":
     write("projects/demo/other", "--title", "Other", "--summary", "Another session's card.", "--content", "- o",
           reason="Another session recorded this.", cli=other)

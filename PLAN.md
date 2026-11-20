@@ -27,7 +27,7 @@
    代价：会话后段做的更正没写回卡里，dream 发现不了。这类问题如果反复出现，再考虑加回对话回顾。
 10. 每次运行都要清理干净（2026-11-17）：运行结束后（包括超时），会话的临时文件和它留下的进程都清掉，记忆库以外不留下文件；运行目录只保留运行记录。
 11. 审阅走邮件（2026-11-17）：夜里有暂存的改动就发邮件，用户直接回复批准、放弃或修改，由 AI 解读回复、程序执行；修改后直接生效，确认邮件给出最终文本；运行失败或越界也发邮件。收件人只放用户自己的邮箱，用 plus 地址。细节见第 10 节。
-12. 只有一个正确答案的规则由程序执行，不靠 prompt（2026-11-18，沿用 news-agent 的做法）：会话拿到的 `mindslice` 是一层检查（guard），stage 模式下自动暂存每次写入，拒绝 delete、`--no-stage`、写 `invest/*`、不以 `[dream]` 开头的 reason，以及读记忆和 `write` 以外的命令；读回复的会话只能读。事后检查保留作兜底。细节见第 7 节。
+12. 只有一个正确答案的规则由程序执行，不靠 prompt（2026-11-18，沿用 news-agent 的做法）：会话拿到的 `mindslice` 是一层检查（guard），stage 模式下自动暂存每次写入，拒绝 delete、`--no-stage`、写 `invest/*`、不以 `[dream]` 开头的 reason、不带 `--if-match` 的 replace，以及读记忆和 `write` 以外的命令；读回复的会话只能读。事后检查保留作兜底，并对比运行前后各个监视仓库的状态（2026-11-19）。细节见第 7 节。
 
 ## 3. 架构总览
 
@@ -116,7 +116,7 @@ gate 决定运行后，脚本把本次任务写进 `input.json`：
 程序强制的规则（决策 12）：会话拿到的 `mindslice`（prompt 里的 `ms`）是运行目录里的 `bin/mindslice`，同时放在会话 PATH 的最前面。它就是 `guard.py`，用引擎自己的参数解析器读参数，这样缩写、选项顺序都和 CLI 的读法一致：
 
 - 只放行读记忆的命令（read、search、manifest、validate、diff、history、status、explain）和 `write`；bake、apply、discard、review、mount、rollback 等一律拒绝。
-- `write`：拒绝 `--op delete`、`--no-stage`、写 `invest/*`（`exclude_prefixes`）、reason 不以 `[dream]` 开头；`--also` 文件里的每一项同样检查（没写 reason 的沿用这次调用的），`--also -` 不收。stage 模式下没带 `--stage` 的自动补上。
+- `write`：拒绝 `--op delete`、`--no-stage`、写 `invest/*`（`exclude_prefixes`）、reason 不以 `[dream]` 开头、`replace` 不带 `--if-match`；`--also` 文件里的每一项同样检查（没写 reason 的沿用这次调用的，replace 成员要有 `if_match`），`--also -` 不收。stage 模式下没带 `--stage` 的自动补上。
 - 被拒绝的调用不执行，返回码 2，stderr 说明原因；通过的原样交给配置的 CLI。
 - 读回复的会话（第 10 节）也拿到 guard，但只能读。
 - guard 防的是 agent 漏写参数，不防故意绕过：用 PATH 上别的 `mindslice`、`uv run mindslice`、`python -m mindslice` 或直接改文件都绕得过去，这些由事后检查兜底。
@@ -140,12 +140,13 @@ prompt 中的规则：
 
 两种模式都不做运行前的还原点（决策 8）。已 bake 的卡改的是 overlay 里的副本，原文仍在 slice 里；只在 overlay 里的卡在 `direct` 模式下被改错，旧文本就找不回了。这部分损失靠上面的规则限制：patch 只动引用的文本，replace 必须带 `--if-match`，不 delete。`stage` 模式下，overlay 在用户 apply 之前保持原样。
 
-事后检查由脚本完成，是 guard 之外的兜底，检查对象是本次运行期间的 history 事件，以及运行前后的 validate 结果：
+事后检查由脚本完成，是 guard 之外的兜底，检查对象是本次运行期间的 history 事件、运行前后的 validate 结果，以及运行前后各个监视仓库的状态：
 
 | 发现 | 处理 |
 | :-- | :-- |
 | dream 的 delete、`invest/*` 写入、直接生效（未暂存）的常驻卡改动、`stage` 模式下未暂存的写入；任何 bake / apply / discard / mount（`retired`）事件 | 记为 guardrail 问题；checkpoint 不推进 |
 | validate 新增 error | 同上 |
+| 监视仓库的 HEAD、分支行（ahead / behind）或未提交的改动（`git diff HEAD`、`status --porcelain`）在运行前后不同：会话提交、推送或在仓库里留下了文件 | 同上（分不清是谁改的：运行期间自己在仓库里改了东西，忽略即可） |
 | 有 reason 不以 `[dream]` 开头的写入 | 说明有其他会话同时在写，只记为并发警告；这些事件留给下次处理 |
 
 history 事件的 op 有 create / replace / patch / append / delete 五种；脚本只按 delete 和地址判断越界，不假设 op 的集合固定。
@@ -272,8 +273,8 @@ MindSlice-dream/
 全部使用 fake harness，不调用真实 LLM（参照 news-agent 的 `tests/fake_harness.py`）。测试在 `mindslice init` 建出的临时工作区上运行，不碰 `~/mindslice`。
 
 - gate：空闲时跳过；四种触发条件各自生效；旧的 validate 警告不会重复触发；`[dream]` 写入和 `invest/*` 写入既不触发，也不进 `input.json`；同一张卡的多次写入在 `input.json` 里合成一条。
-- guard：读命令原样放行；stage 模式下补 `--stage`，direct 模式不补；拒绝 apply / bake、`--no-stage`（含缩写）、delete（含 `--also` 成员）、`invest/*`、非 `[dream]` reason、`--also -`；读回复的会话不能写。fake harness 不加 `--stage`，写入照样暂存。
-- 事后检查（fake harness 绕过 guard 调 PATH 上的下一个 CLI）：能发现 delete、`invest/*` 写入、bake、未暂存的常驻卡改动；发现问题时 checkpoint 不推进；`patch` 事件和一次 `--also` 产生的多条事件按普通写入处理。
+- guard：读命令原样放行；stage 模式下补 `--stage`，direct 模式不补；拒绝 apply / bake、`--no-stage`（含缩写）、delete（含 `--also` 成员）、`invest/*`、非 `[dream]` reason、`--also -`、不带 `--if-match` 的 replace（含 `--also` 成员）；读回复的会话不能写。fake harness 不加 `--stage`，写入照样暂存。
+- 事后检查（fake harness 绕过 guard 调 PATH 上的下一个 CLI）：能发现 delete、`invest/*` 写入、bake、未暂存的常驻卡改动，以及会话在监视仓库里留下的文件和提交；发现问题时 checkpoint 不推进；`patch` 事件和一次 `--also` 产生的多条事件按普通写入处理。
 - 清理：运行目录只剩运行记录；会话留下的进程（包括另开会话的后台进程）在运行结束后被结束；超时时会话本身也被结束；上次中断留下的残留在下次运行开始时清掉。
 - 邮件审阅：用假的 Gmail（SMTP 投进一个邮箱，IMAP 照 Gmail 的格式返回，搜索不过滤）和假的解读会话测试。发信：有改动才发，列出编号和 diff，记下 Message-ID 和 sha256；运行失败也发；同样的改动不重发；从只读 slice 复制的卡，diff 不含引擎自动加的内容。回复：没有 `\Sent` 标签、发件人不对、不在线程里、转发给别人的都不处理；程序自己的邮件不算回复；同一封回复不处理两次；回复旧邮件只回说明。执行：修改先 patch 再 apply，最终文本进确认邮件；暂存版本变过的不执行；解读会话写了记忆或失败时什么都不执行；依赖的新卡没一起批准时留在待审。另外：没有待审时不连 IMAP，dream 运行时跳过。
 - 手动端到端（邮件）：在副本上暂存几处改动，`mail --send` 发一封真邮件，从账号回复，`mail` 取回复，看确认邮件和副本记忆库的变化。

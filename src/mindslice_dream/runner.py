@@ -47,6 +47,16 @@ def check(events: list[dict], before: dict, after: dict, mode: str, exclude: tup
     return problems, warnings
 
 
+def repo_states(repos: list[Path]) -> dict:
+    """HEAD, branch line (ahead / behind) and uncommitted changes of each watched repo. Outside the memory the session
+    only reads (PLAN section 7), so all of it must be the same after the session."""
+    def git(repo: Path, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True).stdout
+
+    return {str(r): (git(r, "rev-parse", "HEAD"), git(r, "status", "--porcelain", "-b"), git(r, "diff", "HEAD"))
+            for r in repos}
+
+
 def script_section(status: str, events: list[dict], problems: list, warnings: list, before: dict, after: dict) -> str:
     def change(key: str) -> str:
         return f"{before[key]} → {after[key]}"
@@ -94,11 +104,13 @@ def dream(cfg: dict, force: bool) -> dict:
                             mode_rule=MODE_RULES[mode], exclude="、".join(f"`{p}`" for p in exclude))
     (run_dir / "prompt.md").write_text(prompt, encoding="utf-8")
 
-    started, t0 = session.now_iso(), time.time()
+    started, t0, repos = session.now_iso(), time.time(), repo_states(cfg["repos"])
     res = session.launch(cfg, run_dir, prompt, write=True)
     events = gate.after(gate.history(ws), task["checkpoint"])
     after = gate.snapshot(cfg)
     problems, warnings = check(events, before, after, mode, exclude)
+    problems += [f"仓库在运行期间变了（HEAD、分支状态或未提交的改动）：{repo}"
+                 for repo, state in repo_states(cfg["repos"]).items() if state != repos[repo]]
 
     if (not report.exists() or report.stat().st_mtime < t0) and (text := session.final_text(res["output"])):
         report.write_text(text.rstrip() + "\n", encoding="utf-8")
