@@ -19,7 +19,7 @@
 4. 写入时的断链警告已经移除（用户同日的后续决定，随 `bake --drop` 一起实现，`e03d55f`，v0.2.1）：`write()` 不再对未解析的 `[[wikilink]]` 告警，断链只由 `validate` 报告；未解析的 extends / supersedes 仍在写入时告警，因为它们会改变读取结果。
    还剩一处与第 3 条不一致：MCP 说明仍要求在会话内处理 `affected_backlinks`（见第 13 节待定事项 2）。
 5. dream 完全通过操作 MindSlice 引擎实现：dream 自己不改引擎，引擎里不引入 LLM。形态是"定时任务 + 一次 LLM agent 会话"。
-6. Harness 用 agy，模型 `gemini-4-hydrogen-high`。
+6. Harness 用 agy，模型 `gemini-4-neon-high`（2026-11-18 由 `gemini-4-hydrogen-high` 换成）。
 7. bake 仍由用户手动批准，dream 不 bake。
 8. 不追求每个修改都能回溯（2026-11-17）：这做不到。在现有基础上尽量减少损失，避免过度设计带来的过度防御。所以 dream 运行前不做还原点，改错只在 overlay 里的卡造成的损失由第 7 节的写入规则来限制。
 9. 不回顾会话记录做溯源（2026-11-17）：项目事实直接对照 git、PyPI、CI、测试核对。出处只用写入时已经记下的内容，即卡里写明的证据和 `mindslice history` 里的 reason。卡里写着"用户决定了 X"、而卡和 reason 都支撑不了的，不改，列进报告的"需要用户处理"。
@@ -39,7 +39,7 @@ systemd timer（每天 03:00）
             无事可做 → 记一条 skipped 后退出（零 LLM 成本）
        2. 准备输入（纯脚本）
             input.json：触发原因、新写入及其 reason、validate 新问题、HEAD 变化
-       3. 一次 agy 会话（gemini-4-hydrogen-high）
+       3. 一次 agy 会话（gemini-4-neon-high）
             prompts/dream.md：新写入 → 新鲜度 → 结构 → 常驻层 → 报告
             只通过 `mindslice` CLI 读写记忆（经 guard，第 7 节）；用 git / PyPI / CI / 测试核对事实
        4. 事后检查（纯脚本）
@@ -187,7 +187,7 @@ state.json          checkpoint（最后一个 history event_id）、上次 valid
 agy 命令沿用 news-agent 的配置：
 
 ```
-agy --print=<prompt> --model gemini-4-hydrogen-high --output-format json \
+agy --print=<prompt> --model gemini-4-neon-high --output-format json \
     --dangerously-skip-permissions --disable-slash-commands
 ```
 
@@ -281,7 +281,7 @@ MindSlice-dream/
 ### 手动端到端
 
 1. 用 `mindslice backup` 备份 `~/mindslice`，再 `mindslice restore` 到临时目录。
-2. 用一份指向副本的配置运行 `mindslice-dream --config <副本配置> run --force`（agy + gemini-4-hydrogen-high；完整命令见 README）。
+2. 用一份指向副本的配置运行 `mindslice-dream --config <副本配置> run --force`（agy + gemini-4-neon-high；完整命令见 README）。
 3. 查看 `report.md` 和 `mindslice -w <副本> diff --scope overlay`，确认每处修改都有证据、没有越界；再确认真实工作区的 history 里没有出现 `[dream]` 写入（隔离开关生效）。
 4. 确认没问题后再安装 timer，对真实工作区运行。
 
