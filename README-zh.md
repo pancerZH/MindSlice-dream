@@ -42,7 +42,7 @@ uv run mindslice -w ~/mindslice history --limit 10               # 真实工作�
 
 `config.toml` 的 `[mail] to` 填上自己的邮箱（例如发件账号的 plus 地址 `<账号>+dream@gmail.com`）就会开启；发信和收信用 `account` 指向的 Gmail 账号文件（news-agent 的 `smtp.toml`，只用其中的 host、port、username、password）。
 
-- 夜间运行结束后，如果 staging 里有 dream 的改动，或者运行没有成功，就发一封邮件：每处改动有编号、reason 和 diff，后面附运行报告。待审的改动和上一封完全一样时不重发。
+- 夜间运行结束后，如果 staging 里有 dream 的改动，或者运行没有成功，就发一封邮件：每处改动一项，有编号、卡片和 reason，后面附运行报告。逐卡的 diff 默认不发，`[mail] attach_diff = true` 时作为附件发出。待审的改动和上一封完全一样时不重发。
 - 直接回复邮件，写明编号和处理方式，例如"全部批准""批准 1-5，放弃 6""3：把 X 改成 Y 再批准"。没提到的保持待审。
 - 每 10 分钟的 timer 取回复：一个 agy 会话把回复解读成每个编号的决定，程序执行（修改是先 patch 暂存版本再 apply），然后在同一个线程里回一封确认邮件，修改过的卡附最终文本。
 - 只认这样的回复：引用了那封审阅邮件、从这个账号发出（Gmail 的"已发"标签）、发件人和收件人都是 `to` 的邮箱。发信后又变过的改动不执行。

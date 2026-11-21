@@ -69,17 +69,30 @@ def test_run_mails_the_dream_changes(cfg, box):
     assert (msg["From"], msg["To"]) == ("me@example.com", "me+dream@example.com")
     assert str(msg["Message-ID"]).endswith("@mindslice-dream>")  # not this machine's hostname
     body = text(msg)
-    assert "━━ 1. projects/demo/notes（新卡）\nreason：[dream] fake: checked against git log" in body
-    assert "━━ 2. projects/demo/status（改 @overlay 现行版本）" in body
-    assert ("-- State: the fix is uncommitted.\n+- State: the fix is committed in abc1234.\n"
-            "+- Verified 2026-11-18 against git log") in body
+    assert ("━━ 待审改动\n\n#1 projects/demo/notes（新卡）\n   fake: checked against git log\n\n"
+            "#2 projects/demo/status（改 @overlay 现行版本）\n   fake: checked against git log\n\n━━ 运行报告") in body
     assert "━━ 运行报告\n\n# Dream 报告" in body and "## 脚本检查" in body
-    assert '<span style="background:#ffebe9">-- State: the fix is uncommitted.</span>' in msg.get_body(("html",)).get_content()
+    assert "uncommitted" not in body and not list(msg.iter_attachments())  # the diffs only on request
+    assert "#1 projects/demo/notes" in msg.get_body(("html",)).get_content()
     assert "friend@example.com" not in msg.as_string()
     rec = gate.load_state(cfg["paths"]["state"])["mail"]["review"]
     assert rec["message_id"] == str(msg["Message-ID"]) and rec["run_id"] == meta["run_id"]
     assert [(i["n"], i["id"], i["state"]) for i in rec["items"]] == [(1, "projects/demo/notes", "pending"),
                                                                     (2, "projects/demo/status", "pending")]
+
+
+def test_the_diffs_can_come_as_an_attachment(cfg, box):
+    cfg["mail"]["attach_diff"] = True
+    meta = runner.run(cfg)
+    [msg] = box.received()
+    [part] = msg.iter_attachments()
+    assert part.get_filename() == f"dream-{meta['run_id']}-diff.txt"
+    assert f"每处改动的 diff 在附件 dream-{meta['run_id']}-diff.txt 里。" in text(msg)
+    diff = part.get_content().replace("\r\n", "\n")
+    assert "━━ #1 projects/demo/notes（新卡）\nreason：[dream] fake: checked against git log" in diff
+    assert ("━━ #2 projects/demo/status（改 @overlay 现行版本）\nreason：[dream] fake: checked against git log\n"
+            "-- State: the fix is uncommitted.\n+- State: the fix is committed in abc1234.\n"
+            "+- Verified 2026-11-18 against git log") in diff
 
 
 def test_nothing_staged_and_an_ok_run_sends_nothing(cfg, box):

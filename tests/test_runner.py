@@ -45,7 +45,7 @@ def test_ok_run_advances_the_checkpoint(cfg, ws):
     assert report.startswith("# Dream 报告") and "## 脚本检查" in report and "checkpoint 已推进" in report
     prompt = (run_dir / "prompt.md").read_text()
     guard = str(run_dir / session.GUARD)
-    assert "{{" not in prompt and f"`{guard} -w {ws}`" in prompt
+    assert "{{" not in prompt and f"`{guard} -w {ws}`" in prompt and runner.REPORT_CHANGES["stage"] in prompt
     # the harness's own MindSlice plugin is switched off; memory is reachable only through the configured workspace,
     # and the session's mindslice is the guard, which staged the writes the session sent without --stage
     [seen] = session_output(meta)

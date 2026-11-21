@@ -35,8 +35,9 @@ def mailbox(address) -> str:
     return f"{local.split('+', 1)[0]}@{domain}"
 
 
-def compose(cfg: dict, subject: str, text: str, page: str | None = None, reply_to=None) -> EmailMessage:
-    """A mail to the configured address; with reply_to, an answer in that mail's thread."""
+def compose(cfg: dict, subject: str, text: str, page: str | None = None, reply_to=None,
+            attachment: tuple[str, str] | None = None) -> EmailMessage:
+    """A mail to the configured address; with reply_to, an answer in that mail's thread; attachment: (file name, text)."""
     msg = EmailMessage()
     msg["Subject"], msg["From"], msg["To"] = subject, account(cfg)["username"], cfg["mail"]["to"]
     msg["Date"] = formatdate(usegmt=True)
@@ -48,6 +49,8 @@ def compose(cfg: dict, subject: str, text: str, page: str | None = None, reply_t
     msg.set_content(text)
     if page:
         msg.add_alternative(page, subtype="html")
+    if attachment:
+        msg.add_attachment(attachment[1], filename=attachment[0])
     return msg
 
 

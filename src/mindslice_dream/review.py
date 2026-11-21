@@ -129,45 +129,53 @@ def dependencies(items: list[dict]) -> dict[int, list[int]]:
 # ---------------------------------------------------------------- the review mail
 
 
-def as_html(blocks: list[tuple[str, bool]]) -> str:
-    """The mail as one preformatted page; in the diffs, removed and added lines are highlighted."""
-    lines = []
-    for text, is_diff in blocks:
-        for line in text.splitlines():
-            shown = html.escape(line)
-            if is_diff and line[:1] in ("-", "+"):
-                shown = f'<span style="background:{"#ffebe9" if line[0] == "-" else "#e6ffec"}">{shown}</span>'
-            lines.append(shown)
-        lines.append("")
-    body = "\n".join(lines)
+def as_html(text: str) -> str:
+    """The mail as one preformatted page, so the report's tables line up."""
     return ('<pre style="white-space:pre-wrap;word-break:break-word;'
-            f'font:13px/1.5 ui-monospace,Menlo,Consolas,monospace">{body}</pre>')
+            f'font:13px/1.5 ui-monospace,Menlo,Consolas,monospace">{html.escape(text)}</pre>')
 
 
-def review_mail(run_id: str, status: str, items: list[dict], others: int, report: str) -> tuple[str, str, str]:
-    """Subject, text and HTML of the mail that lists the pending changes, or reports a failed run."""
+def listed(n: int, it: dict) -> str:
+    """One change in the mail: number, card, where it comes from and what the dream says it changed."""
+    reasons = [r.split("]", 1)[1].strip() for r in it["reasons"]]  # all start with [dream] or [dream-review]
+    return "\n".join([f"#{n} {it['id']}（{it['source']}）", *(f"   {r}" for r in reasons if r)])
+
+
+def diff_text(n: int, it: dict) -> str:
+    """One change in the diff attachment."""
+    lines = [f"━━ #{n} {it['id']}（{it['source']}）", *(f"reason：{r}" for r in it["reasons"]),
+             *(it["diff"] or ["（内容没有变化）"])]
+    if it["folded"]:
+        lines.append(f"另有 {it['folded']} 行只是链接补上了 slice 前缀，文字没变。")
+    return "\n".join(lines)
+
+
+def review_mail(run_id: str, status: str, items: list[dict], others: int, report: str,
+                diffs: bool = False) -> tuple[str, str, tuple[str, str] | None]:
+    """Subject, text and, with diffs, the attachment (file name, text) of the mail that lists the pending changes
+    by number, or reports a failed run. The per-card diffs go only into the attachment."""
     subject = f"[{mail.SUBJECT_TAG} {run_id}] " + (f"{len(items)} 处改动待审" if items else status)
     if items and status != "ok":
         subject += f" · {status}"
     head = [f"MindSlice dream {run_id}：" + ("运行正常。" if status == "ok"
                                              else f"运行没有成功（{status}），checkpoint 没有推进，下次重来。")]
+    attachment = None
     if items:
-        head += [f"staging 里有 {len(items)} 处 dream 的改动等你审阅（包括以前没处理完的），这封邮件取代之前的审阅邮件。",
-                 HOWTO]
+        head += [f"staging 里有 {len(items)} 处 dream 的改动等你审阅（包括以前没处理完的），这封邮件取代之前的审阅邮件。"
+                 "回复时用下面清单里的编号。", HOWTO]
+        if diffs:
+            attachment = (f"dream-{run_id}-diff.txt", "\n\n".join(diff_text(n, it) for n, it in enumerate(items, 1)) + "\n")
+            head.append(f"每处改动的 diff 在附件 {attachment[0]} 里。")
         head += [f"#{n} 依赖 {'、'.join(f'#{d}' for d in deps)}：要一起批准，只批准 #{n} 的话它会保持待审。"
                  for n, deps in dependencies(items).items()]
     if others:
         head.append(f"另有 {others} 处暂存改动不是 dream 的，不在这封邮件里，用 /mindslice:review 审阅。")
-    blocks = [("\n\n".join(head), False)]
-    for n, it in enumerate(items, 1):
-        reasons = "\n".join(f"reason：{r}" for r in it["reasons"])
-        blocks += [(f"━━ {n}. {it['id']}（{it['source']}）\n{reasons}", False),
-                   ("\n".join(it["diff"]) or "（内容没有变化）", True)]
-        if it["folded"]:
-            blocks.append((f"另有 {it['folded']} 行只是链接补上了 slice 前缀，文字没变。", False))
+    parts = ["\n\n".join(head)]
+    if items:
+        parts.append("━━ 待审改动\n\n" + "\n\n".join(listed(n, it) for n, it in enumerate(items, 1)))
     if report:
-        blocks.append(("━━ 运行报告\n\n" + report.strip(), False))
-    return subject, "\n\n".join(text for text, _ in blocks) + "\n", as_html(blocks)
+        parts.append("━━ 运行报告\n\n" + report.strip())
+    return subject, "\n\n".join(parts) + "\n", attachment
 
 
 def notify(cfg: dict, run_id: str, status: str, report: Path | None, force: bool = False) -> str:
@@ -186,8 +194,8 @@ def notify(cfg: dict, run_id: str, status: str, report: Path | None, force: bool
         if status == "ok" and (not items or (not force and [(i["id"], i["sha256"], i["change_ids"]) for i in items] == mailed)):
             return "not needed"
         text = report.read_text(encoding="utf-8") if report and report.exists() else ""
-        subject, body, page = review_mail(run_id, status, items, others, text)
-        msg = mail.compose(cfg, subject, body, page)
+        subject, body, attachment = review_mail(run_id, status, items, others, text, cfg["mail"].get("attach_diff", False))
+        msg = mail.compose(cfg, subject, body, as_html(body), attachment=attachment)
         mail.send(cfg, msg)
     except Exception as e:
         return f"failed: {type(e).__name__}: {e}"

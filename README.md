@@ -42,7 +42,7 @@ uv run mindslice -w ~/mindslice history --limit 10               # no [dream] wr
 
 Set `[mail] to` in `config.toml` to your own address (e.g. a plus address of the sending account, `<account>+dream@gmail.com`) to turn it on. Sending and receiving use the Gmail account file that `account` points to (news-agent's `smtp.toml`; only its host, port, username and password are used).
 
-- After the nightly run, if staging holds dream changes or the run did not succeed, one email is sent: each change has a number, its reason and its diff, followed by the run report. It is not resent if the pending changes are exactly the same as in the previous email.
+- After the nightly run, if staging holds dream changes or the run did not succeed, one email is sent: one entry per change, with its number, card and reason, followed by the run report. The per-card diffs are left out unless `[mail] attach_diff = true`, which sends them as an attachment. It is not resent if the pending changes are exactly the same as in the previous email.
 - Reply to the email directly, giving numbers and what to do, e.g. "approve all", "approve 1-5, discard 6", "3: change X to Y, then approve". Anything not mentioned stays pending.
 - A timer fetches replies every 10 minutes: an agy session turns the reply into a decision for each number, the program carries them out (an amendment patches the staged version first, then applies it), and a confirmation is sent in the same thread, with the final text of any amended card.
 - Only replies that quote the review email, were sent from this account (Gmail's "Sent" label), and have the `to` address as both sender and recipient are accepted. Changes that have changed since the email was sent are not acted on.

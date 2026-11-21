@@ -26,6 +26,7 @@ to = ""                                      # 只放自己的邮箱，例如发
 account = "~/.config/news-agent/smtp.toml"   # 发信和收信的 Gmail 账号：host、port、username、password（news-agent 的格式）
 imap = "imap.gmail.com"
 timeout_minutes = 10                         # 解读一封回复的 agy 会话
+attach_diff = false                          # true：每张卡的 diff 作为附件发出；正文只有编号清单和运行报告
 
 # {prompt} 换成渲染后的 prompt；resume 里的 {session_id} 换成会话 id
 [harness]

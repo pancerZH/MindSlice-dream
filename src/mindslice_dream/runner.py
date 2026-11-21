@@ -19,6 +19,11 @@ MODE_RULES = {
              "暂存的改动不会出现在 `ms read` 里，要看用 `ms --json diff`；再写同一张卡时，是在它的暂存版本上改。",
     "direct": "`direct`。直接写入 @overlay；用户 bake 时会审阅这些改动。",
 }
+# the report's line on the changes: in stage mode the review mail lists them, numbered, with their reasons
+REPORT_CHANGES = {
+    "stage": "改了哪些卡不用逐条列，也不要给改动编号：审阅邮件会按程序的编号列出每处暂存改动和它的 reason；",
+    "direct": "做了哪些修改（地址 + 一句话理由）；",
+}
 
 
 def check(events: list[dict], before: dict, after: dict, mode: str, exclude: tuple[str, ...]) -> tuple[list, list]:
@@ -101,7 +106,7 @@ def dream(cfg: dict, force: bool) -> dict:
     input_path.write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prompt = session.render(PROMPT.read_text(encoding="utf-8"), date=task["date"], workspace=ws, input=input_path,
                             report=report, ms=shlex.join([str(run_dir / session.GUARD), "-w", str(ws)]),
-                            mode_rule=MODE_RULES[mode], exclude="、".join(f"`{p}`" for p in exclude),
+                            mode_rule=MODE_RULES[mode], changes=REPORT_CHANGES[mode], exclude="、".join(f"`{p}`" for p in exclude),
                             max_chars=cfg["dream"]["max_card_chars"])
     (run_dir / "prompt.md").write_text(prompt, encoding="utf-8")
 
