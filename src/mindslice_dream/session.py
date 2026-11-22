@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # what a run directory keeps; the session's scratch files in work/ (and anything else) are deleted after the run
-RUN_RECORD = {"input.json", "prompt.md", "stdout.log", "stderr.log", "report.md", "meta.json"}
+RUN_RECORD = {"input.json", "prompt.md", "stdout.log", "stderr.log", "report.md", "drops.json", "meta.json"}
 
 # variables a parent harness leaks into children; without them the child starts a standalone session
 STRIP_PREFIXES = ("ANTIGRAVITY_", "CLAUDE_CODE_", "CODEX_", "MINDSLICE_PLUGIN_", "PLUGIN_")

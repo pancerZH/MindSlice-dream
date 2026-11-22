@@ -8,6 +8,7 @@ and leaves a stray file in the run directory. FAKE_DREAM changes that:
   on PATH (an unstaged write; apply; --no-stage to an always-loaded card; another session's write) or a broken file
   written directly; repofile | repocommit: a file left in a watched repo, or a commit there;
 - noreport | answer | fail | sleep | straggler.
+FAKE_DROPS, when set, is written as the session's drops.json.
 """
 
 import json
@@ -25,6 +26,7 @@ ms = shlex.split(re.search(r"记忆命令：`([^`]+)`", prompt).group(1))
 workspace = Path(re.search(r"记忆工作区：`([^`]+)`", prompt).group(1))
 task = json.loads(Path(re.search(r"任务输入：`([^`]+)`", prompt).group(1)).read_text())
 report = Path(re.search(r"报告：写到 `([^`]+)`", prompt).group(1))
+drops = Path(re.search(r"删卡建议：写到 `([^`]+)`", prompt).group(1))
 mode = os.environ.get("FAKE_DREAM", "")
 # the first mindslice on PATH, and the next one: the CLI the guard runs, reached around it
 other = [shutil.which("mindslice", path=os.environ["PATH"].split(os.pathsep, 1)[1]), "-w", str(workspace)]
@@ -89,6 +91,8 @@ elif mode == "concurrent":
     write("projects/demo/other", "--title", "Other", "--summary", "Another session's card.", "--content", "- o",
           reason="Another session recorded this.", cli=other)
 
+if "FAKE_DROPS" in os.environ:
+    drops.write_text(os.environ["FAKE_DROPS"])
 if mode not in ("noreport", "answer"):
     report.write_text("# Dream 报告\n\n- 查了 1 张卡，1 张过期，已改正。\n")
 (report.parent / "notes.txt").write_text("scratch written next to the report")

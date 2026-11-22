@@ -23,7 +23,7 @@ uv run mindslice-dream --config other.toml run   # use another config (e.g. one 
 
 Configuration lives in the local `config.toml` (template: `config.example.toml`): the workspace, the write mode (default `stage`: every write is staged for review via email, `mindslice diff` or `/mindslice:review`), the repositories to watch, the address review emails go to, and the agy command and timeout.
 
-Each run's output goes to `runs/<YYYYMMDD-HHMMSS>/`: `input.json`, `prompt.md`, `stdout.log` / `stderr.log`, `report.md` (the dream's report, followed by the script's checks) and `meta.json` (status, trigger reasons, problems, resume command). `runs/latest.md` points to the latest report; `state.json` holds the checkpoint, which only advances when the checks pass.
+Each run's output goes to `runs/<YYYYMMDD-HHMMSS>/`: `input.json`, `prompt.md`, `stdout.log` / `stderr.log`, `report.md` (the dream's report, followed by the drop proposals and the script's checks), `drops.json` (when it proposed any) and `meta.json` (status, trigger reasons, problems, resume command). `runs/latest.md` points to the latest report; `state.json` holds the checkpoint, which only advances when the checks pass.
 
 ## Try it on a copy first
 
@@ -53,6 +53,15 @@ uv run mindslice-dream mail --send   # send a review email for the dream's stage
 ```
 
 Each processed reply leaves `runs/<time>-review/`: `input.json` (the reply text and the changes), `prompt.md`, the two logs, `report.md` (the confirmation email's body) and `meta.json` (decisions and results).
+
+## Whole-card drop proposals
+
+The dream never deletes a card. It writes cards that could go as a whole (forwarding stubs, finished or fully moved cards) to `runs/<id>/drops.json`, each with a reason, checkable evidence and any statements to move elsewhere first. The program checks them, keeps the open ones in `state.json` across runs and lists them in the report (so also in the review email, unnumbered: replies do not act on them), with the slice holding each card, an @overlay copy if there is one, and the live cards that link to or extend it. Carrying one out (moving content, fixing links, `mindslice bake @slice --drop <path>`) is done in a Claude session.
+
+```bash
+uv run mindslice-dream drops                                # the open proposals, with current links; dropped cards leave the list
+uv run mindslice-dream drops --keep <card> --why "<reason>"   # the user keeps it: the dream proposes it no more
+```
 
 ## Scheduling
 

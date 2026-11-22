@@ -23,7 +23,7 @@ uv run mindslice-dream --config other.toml run   # 换一份配置（例如指�
 
 配置在本机的 `config.toml`（模板是 `config.example.toml`）：工作区、写入模式（默认 `stage`，所有写入暂存待审，用邮件、`mindslice diff` 或 `/mindslice:review` 审阅）、关注的仓库、审阅邮件的收件地址、agy 命令和超时。
 
-每次运行的产物在 `runs/<YYYYMMDD-HHMMSS>/`：`input.json`、`prompt.md`、`stdout.log` / `stderr.log`、`report.md`（dream 写的报告，后面附脚本检查）、`meta.json`（状态、触发原因、问题、resume 命令）。`runs/latest.md` 指向最近一次报告；`state.json` 存 checkpoint，只有检查通过才推进。
+每次运行的产物在 `runs/<YYYYMMDD-HHMMSS>/`：`input.json`、`prompt.md`、`stdout.log` / `stderr.log`、`report.md`（dream 写的报告，后面附整卡删除建议和脚本检查）、`drops.json`（有删卡建议时）、`meta.json`（状态、触发原因、问题、resume 命令）。`runs/latest.md` 指向最近一次报告；`state.json` 存 checkpoint，只有检查通过才推进。
 
 ## 先在副本上试
 
@@ -53,6 +53,15 @@ uv run mindslice-dream mail --send   # 立刻把 staging 里 dream 的改动发�
 ```
 
 每处理一封回复会留下 `runs/<时间>-review/`：`input.json`（回复正文和改动）、`prompt.md`、两个日志、`report.md`（确认邮件的正文）、`meta.json`（决定和执行结果）。
+
+## 整卡删除建议
+
+dream 不删卡。可以整张删掉的卡（转发桩、做完了或内容都已挪走的卡）写进 `runs/<id>/drops.json`，每张带理由、可核对的依据和删前要挪走的语句。程序检查后把没处理的候选存在 `state.json` 里跨运行保留，并列进报告（所以也在审阅邮件里，不编号，回复邮件不处理它们），附上卡所在的 slice、@overlay 里的副本，以及还链接它、扩展它的生效卡片。执行（挪内容、改链接、`mindslice bake @slice --drop <path>`）在 Claude 会话里做。
+
+```bash
+uv run mindslice-dream drops                               # 列出没处理的候选和当前的链接；卡删掉后自动移出
+uv run mindslice-dream drops --keep <card> --why "<原因>"   # 决定保留：dream 以后不再提
+```
 
 ## 定时
 

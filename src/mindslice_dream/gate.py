@@ -154,6 +154,9 @@ def evaluate(cfg: dict, state: dict, snap: dict, force: bool = False, now: datet
         "validate_new": new_issues,
         "oversized": large,
         "repos": repos,
+        # whole-card drop proposals already open, and the cards the user decided to keep (drops.py)
+        "drops": {"pending": [d["card"] for d in state.get("drops", {}).get("pending", [])],
+                  "kept": state.get("drops", {}).get("kept", [])},
         "checkpoint": position(events, checkpoint),
     }
 

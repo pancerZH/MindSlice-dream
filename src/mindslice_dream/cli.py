@@ -1,5 +1,5 @@
-"""mindslice-dream run [--force] [--dry-run] | mail [--send]: the nightly dream pass over a MindSlice workspace,
-and the review of its staged changes by email."""
+"""mindslice-dream run [--force] [--dry-run] | mail [--send] | drops [--keep CARD --why TEXT]: the nightly dream pass
+over a MindSlice workspace, the review of its staged changes by email, and its open whole-card drop proposals."""
 
 import argparse
 import json
@@ -8,7 +8,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from . import review, runner
+from . import drops, review, runner
 
 DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config.toml"
 
@@ -47,9 +47,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--dry-run", action="store_true", help="only run the gate and print input.json")
     p = sub.add_parser("mail", help="carry out the replies to the review mail (what the 10-minute timer runs)")
     p.add_argument("--send", action="store_true", help="mail the pending dream changes now instead")
+    p = sub.add_parser("drops", help="list the open whole-card drop proposals with what dropping each would touch")
+    p.add_argument("--keep", metavar="CARD", help="record that the user keeps this card: dream proposes it no more")
+    p.add_argument("--why", default="", help="why the user keeps it (required with --keep)")
     args = ap.parse_args(argv)
+    if args.cmd == "drops" and args.keep and not args.why.strip():
+        ap.error("--keep needs --why")
 
     cfg = load_config(args.config)
+    if args.cmd == "drops":
+        print(drops.show(cfg, args.keep, args.why.strip()))
+        return 0
     if args.cmd == "mail":
         if args.send:
             result = review.send_now(cfg)

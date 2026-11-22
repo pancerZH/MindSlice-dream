@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import gate, review, session
+from . import drops, gate, review, session
 
 ROOT = Path(__file__).resolve().parents[2]
 PROMPT = ROOT / "prompts" / "dream.md"
@@ -105,7 +105,8 @@ def dream(cfg: dict, force: bool) -> dict:
     input_path, report = run_dir / "input.json", run_dir / "report.md"
     input_path.write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prompt = session.render(PROMPT.read_text(encoding="utf-8"), date=task["date"], workspace=ws, input=input_path,
-                            report=report, ms=shlex.join([str(run_dir / session.GUARD), "-w", str(ws)]),
+                            report=report, drops=run_dir / drops.FILE,
+                            ms=shlex.join([str(run_dir / session.GUARD), "-w", str(ws)]),
                             mode_rule=MODE_RULES[mode], changes=REPORT_CHANGES[mode], exclude="、".join(f"`{p}`" for p in exclude),
                             max_chars=cfg["dream"]["max_card_chars"])
     (run_dir / "prompt.md").write_text(prompt, encoding="utf-8")
@@ -122,7 +123,9 @@ def dream(cfg: dict, force: bool) -> dict:
         report.write_text(text.rstrip() + "\n", encoding="utf-8")
     status = (res["status"] if res["status"] != "ok" else "no report" if not report.exists()
               else "guardrail problems" if problems else "ok")
+    open_drops, drops_text, refused = drops.after_run(cfg, run_dir, state.get("drops", {}), exclude)
     with open(report, "a", encoding="utf-8") as f:
+        f.write(drops_text)
         f.write(script_section(status, events, problems, warnings, before, after))
     latest = paths["runs"] / "latest.md"
     latest.unlink(missing_ok=True)
@@ -130,13 +133,14 @@ def dream(cfg: dict, force: bool) -> dict:
 
     last_run = {"status": status, "at": started, "run_id": run_dir.name}
     gate.save_state(paths["state"], (gate.next_state(state, task, after) if status == "ok" else state) | {
-        "last_run": last_run})
+        "last_run": last_run, "drops": open_drops})
     engine = subprocess.run([cfg["memory"]["mindslice"], "--version"], capture_output=True, text=True).stdout.strip()
     meta = {"run_id": run_dir.name, "started": started, "finished": session.now_iso(), "status": status,
             "triggers": task["triggers"], "full_sweep": task["full_sweep"], "mode": mode, "engine": engine,
             "exit_code": res["exit_code"], "session_id": res["session_id"], "resume": res["resume"],
             "checkpoint": task["checkpoint"], "advanced": status == "ok", "problems": problems,
-            "warnings": warnings, "run_dir": str(run_dir), "report": str(report), "cmd": res["cmd"],
+            "warnings": warnings, "drops_refused": refused, "run_dir": str(run_dir), "report": str(report),
+            "cmd": res["cmd"],
             "mail": review.notify(cfg, run_dir.name, status, report)}
     (run_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return meta
