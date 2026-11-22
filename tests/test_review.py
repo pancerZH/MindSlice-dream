@@ -73,7 +73,11 @@ def test_run_mails_the_dream_changes(cfg, box):
             "#2 projects/demo/status（改 @overlay 现行版本）\n   fake: checked against git log\n\n━━ 运行报告") in body
     assert "━━ 运行报告\n\n# Dream 报告" in body and "## 脚本检查" in body
     assert "uncommitted" not in body and not list(msg.iter_attachments())  # the diffs only on request
-    assert "#1 projects/demo/notes" in msg.get_body(("html",)).get_content()
+    html_body = msg.get_body(("html",)).get_content()
+    assert '<span class="num">#1</span><code>projects/demo/notes</code>' in html_body
+    assert "<h1>Dream 报告</h1>" in html_body and "<h2>脚本检查</h2>" in html_body
+    assert "<li>查了 1 张卡，1 张过期，已改正。</li>" in html_body
+    assert not html_body.startswith("<pre")
     assert "friend@example.com" not in msg.as_string()
     rec = gate.load_state(cfg["paths"]["state"])["mail"]["review"]
     assert rec["message_id"] == str(msg["Message-ID"]) and rec["run_id"] == meta["run_id"]
@@ -146,6 +150,9 @@ def test_a_reply_is_carried_out_and_confirmed(cfg, ws, box, monkeypatch):
     body = text(confirm)
     assert "修改后生效：#2 projects/demo/status，最终文本：" in body and "committed and pushed in abc1234" in body
     assert "已放弃：#1 projects/demo/notes" in body and "这封审阅邮件里的改动都处理完了。" in body
+    confirm_html = confirm.get_body(("html",)).get_content()
+    assert "<strong>修改后生效</strong>" in confirm_html and "<blockquote>" in confirm_html
+    assert "<li>State: the fix is committed and pushed in abc1234.</li>" in confirm_html
     assert [i["state"] for i in gate.load_state(cfg["paths"]["state"])["mail"]["review"]["items"]] == [
         "discarded", "modified"]
     logins = box.logins
@@ -333,3 +340,19 @@ def test_two_missing_dependencies_on_one_card_stay_pending(cfg, ws):
                                      {it["id"]: it["sha256"] for it in items})[child["n"]]
     assert outcome == "pending" and "@overlay/one" in detail and "@overlay/two" in detail
     assert len(staged(ws)) == 3
+
+
+def test_review_mail_renders_markdown_to_html_safely():
+    items = [{"id": "projects/demo/status", "address": "@overlay/projects/demo/status",
+              "create": False, "refs": [], "source": "改 @overlay 现行版本",
+              "reasons": ["[dream] 更新 `main` 与 **测试数**，去掉 <raw> 标记"]}]
+    report = ("# Dream 报告\n\n- **核对**：`2` 张卡，见 <script>alert(1)</script>\n\n"
+              "| 卡片 | 字符数 |\n| --- | ---: |\n| `a/b` | 120 |\n")
+    _, plain, page, _ = review.review_mail("20261122-030000", "ok", items, 0, report)
+    assert "##" not in plain and "# Dream 报告" in plain
+    assert "<h2>待审改动</h2>" in page
+    assert "更新 <code>main</code> 与 <strong>测试数</strong>，去掉 &lt;raw&gt; 标记" in page
+    assert "<h1>Dream 报告</h1>" in page
+    assert "<strong>核对</strong>：<code>2</code> 张卡" in page
+    assert "<table>" in page and "<td><code>a/b</code></td>" in page
+    assert "<script>" not in page and "&lt;script&gt;" in page

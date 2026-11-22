@@ -7,7 +7,7 @@ A nightly "dream" for a MindSlice workspace (default `~/mindslice`). The script 
 ## Install
 
 ```bash
-uv sync                      # the only dependency is mindslice>=0.2.5; the CLI is installed in .venv
+uv sync                      # installs mindslice>=0.2.5 and markdown-it-py>=3.0 in .venv
 cp config.example.toml config.toml   # then edit workspace, watch.repos, etc.; config.toml stays on this machine and is not committed
 uv run pytest                # fake harness: no real LLM calls, never touches ~/mindslice
 ```

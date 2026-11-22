@@ -228,7 +228,7 @@ stage 模式下，dream 的改动要等用户审阅。为了不用每天开电�
    - 正文里每处改动只占一项：编号、卡片、来源（改 @overlay 现行版本 / 从某个只读 slice 复制并修改 / 新卡）和 reason（去掉 `[dream]` 前缀），用户按这里的编号回复。编号由程序按卡片路径给，覆盖 staging 里 dream 的全部待审改动，包括以前的运行没处理完的；运行报告不给改动编号，也不逐条列改动（决策 14）。
    - diff 默认不发。`[mail] attach_diff = true` 时作为附件 `dream-<运行 id>-diff.txt` 发出，每处改动一段：编号、卡片、来源、reason 和 diff。diff 对照现行版本：已在 @overlay 的卡对照 overlay 里的文件，从只读 slice 复制出来的卡对照 slice 里的原卡。标题、别名、标签、extends、supersedes、load 有变化的单独列出。引擎复制卡时自动加的 supersedes 指针和链接上的 slice 前缀不算改动，只补了前缀的行注明行数。
    - 某张新卡被其他改动的 extends / supersedes 引用时，注明"#n 依赖 #m，要一起批准"。
-   - 最后附这次运行的完整报告，包括"需要用户处理"和脚本检查。正文是纯文本，另附一份内容相同的 HTML（等宽排版，报告里的表格能对齐）。
+   - 最后附这次运行的完整报告，包括"需要用户处理"和脚本检查。正文是纯文本，另附一份渲染成 HTML 的版本（`markdown-it-py`，排版与表格、列表、代码样式清晰可读；确认邮件同样附 HTML 版本）。
    - 主题里带运行 id（例如 `[MindSlice dream 20261118-030012] 12 处改动待审`）。Message-ID 由程序生成，和每个编号对应的卡片、暂存版本的 sha256 一起记进 `state.json`。有改动的邮件取代上一封审阅邮件，旧的 Message-ID 记为已取代；只报告运行失败、没有改动的邮件，不影响当前的审阅邮件。
 2. **回复**：用户直接回复，用自然语言写决定，例如"全部批准""批准 1–5，放弃 6""3：把 X 改成 Y 再批准"。没提到的保持待审。
 3. **取回复**：每 10 分钟运行一次的 timer（`mindslice-dream mail`）。
@@ -277,7 +277,7 @@ MindSlice-dream/
   tests/
 ```
 
-- Python 3.12+，代码只用标准库，与 MindSlice、Forge 一致。唯一的依赖是 `mindslice>=0.2.2`（第一个带 `op=patch`、`--also` 和多地址 `read` 的版本），让 `uv run` 用上这个 CLI。
+- Python 3.12+，依赖只有 `mindslice>=0.2.5` 和渲染邮件 HTML 用的 `markdown-it-py>=3.0`（与 news-agent 一致）。
 - 通过子进程调用 `mindslice` CLI，不 import 引擎内部代码。唯一的例外是 guard 用引擎 CLI 的参数解析器（`build_parser`），这样它和 CLI 对参数的读法完全一致；导入失败时会话的每次调用都失败，不会放行。
 - 代码保持短小，需要判断的放在 prompt 里；只有一个正确答案的规则放在程序里（决策 12）。
 - `--dry-run` 只跑 gate 和输入准备，打印 `input.json`，不启动 agy。

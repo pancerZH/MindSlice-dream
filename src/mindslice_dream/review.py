@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from email import message_from_string, policy
 from pathlib import Path
 
+from markdown_it import MarkdownIt
 from mindslice import MindSliceError, Workspace
 from mindslice.operations.writer import fork_seed
 
@@ -24,12 +25,41 @@ FIELDS = ("title", "aliases", "tags", "extends", "supersedes", "load")
 OUTCOMES = {"applied": "已生效", "modified": "修改后生效", "discarded": "已放弃", "pending": "保持待审", "skipped": "没执行"}
 HANDLED = ("applied", "modified", "discarded")
 
-HOWTO = """直接回复这封邮件，写明编号和怎么处理，例如：
-  全部批准
-  批准 1-5，放弃 6
-  3：把"旧的说法"改成"新的说法"再批准
-没提到的保持待审。修改后直接生效，确认邮件里会给出最终文本。"""
+HOWTO_EXAMPLES = '全部批准\n批准 1-5，放弃 6\n3：把"旧的说法"改成"新的说法"再批准'
+HOWTO = ("直接回复这封邮件，写明编号和怎么处理，例如：\n"
+         + "\n".join(f"  {line}" for line in HOWTO_EXAMPLES.splitlines())
+         + "\n没提到的保持待审。修改后直接生效，确认邮件里会给出最终文本。")
 SUPERSEDED = "这封审阅邮件已经被更新的一封取代：{subject}。这次回复里的决定没有执行，请回复最新那封。"
+
+MD = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+CSS = """
+body { margin: 0; padding: 16px; background: #f6f7f9; }
+.page { max-width: 780px; margin: 0 auto; padding: 20px 24px; background: #fff; border-radius: 8px;
+        font: 15px/1.7 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; color: #1f2328; }
+h1 { font-size: 21px; margin: 20px 0 12px; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
+h2 { font-size: 17px; margin: 24px 0 10px; border-left: 4px solid #2563eb; padding-left: 10px; }
+h3 { font-size: 15px; margin: 18px 0 8px; }
+p { margin: 8px 0; }
+ul, ol { margin: 8px 0; padding-left: 22px; }
+li { margin: 4px 0; }
+a { color: #2563eb; text-decoration: none; }
+blockquote { margin: 12px 0; padding: 8px 14px; background: #f3f4f6; border-left: 4px solid #9ca3af; color: #374151; }
+table { border-collapse: collapse; margin: 12px 0; font-size: 13px; width: 100%; }
+th, td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
+th { background: #f9fafb; }
+code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+pre { background: #f3f4f6; padding: 10px 12px; border-radius: 6px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+hr { border: none; border-top: 1px solid #e5e7eb; margin: 20px 0; }
+.howto { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 14px; margin: 12px 0; font-size: 14px; color: #374151; }
+.howto pre { margin: 6px 0; padding: 6px 10px; background: #fff; border: 1px solid #e5e7eb; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+.warn { background: #fffbeb; border-left: 4px solid #d97706; padding: 8px 12px; margin: 10px 0; border-radius: 0 4px 4px 0; font-size: 14px; }
+.item { padding: 10px 0; border-bottom: 1px solid #f0f2f5; }
+.item:last-child { border-bottom: none; }
+.num { font-weight: 700; color: #2563eb; margin-right: 4px; }
+.src { color: #6b7280; font-size: 13px; }
+.reason { margin: 4px 0 0 22px; color: #374151; }
+"""
 
 
 def write_json(path: Path, value) -> None:
@@ -129,16 +159,26 @@ def dependencies(items: list[dict]) -> dict[int, list[int]]:
 # ---------------------------------------------------------------- the review mail
 
 
-def as_html(text: str) -> str:
-    """The mail as one preformatted page, so the report's tables line up."""
-    return ('<pre style="white-space:pre-wrap;word-break:break-word;'
-            f'font:13px/1.5 ui-monospace,Menlo,Consolas,monospace">{html.escape(text)}</pre>')
+def html_page(title: str, body: str) -> str:
+    return (f'<!DOCTYPE html><html><head><meta charset="utf-8"><title>{html.escape(title)}</title>'
+            f'<style>{CSS}</style></head><body><div class="page">{body}</div></body></html>')
+
+
+def reasons(it: dict) -> list[str]:
+    """The dream's reasons for one staged item, without the [dream] / [dream-review] prefix."""
+    return [text for r in it["reasons"] if (text := r.split("]", 1)[1].strip())]
 
 
 def listed(n: int, it: dict) -> str:
     """One change in the mail: number, card, where it comes from and what the dream says it changed."""
-    reasons = [r.split("]", 1)[1].strip() for r in it["reasons"]]  # all start with [dream] or [dream-review]
-    return "\n".join([f"#{n} {it['id']}（{it['source']}）", *(f"   {r}" for r in reasons if r)])
+    return "\n".join([f"#{n} {it['id']}（{it['source']}）", *(f"   {r}" for r in reasons(it))])
+
+
+def listed_html(n: int, it: dict) -> str:
+    head = (f'<div><span class="num">#{n}</span><code>{html.escape(it["id"])}</code> '
+            f'<span class="src">（{html.escape(it["source"])}）</span></div>')
+    body = "".join(f'<p class="reason">{MD.renderInline(r)}</p>' for r in reasons(it))
+    return f'<div class="item">{head}{body}</div>'
 
 
 def diff_text(n: int, it: dict) -> str:
@@ -151,31 +191,48 @@ def diff_text(n: int, it: dict) -> str:
 
 
 def review_mail(run_id: str, status: str, items: list[dict], others: int, report: str,
-                diffs: bool = False) -> tuple[str, str, tuple[str, str] | None]:
-    """Subject, text and, with diffs, the attachment (file name, text) of the mail that lists the pending changes
-    by number, or reports a failed run. The per-card diffs go only into the attachment."""
+                diffs: bool = False) -> tuple[str, str, str, tuple[str, str] | None]:
+    """Subject, plain text, rendered HTML and, with diffs, the attachment (file name, text) of the mail that lists
+    the pending changes by number, or reports a failed run. The per-card diffs go only into the attachment."""
     subject = f"[{mail.SUBJECT_TAG} {run_id}] " + (f"{len(items)} 处改动待审" if items else status)
     if items and status != "ok":
         subject += f" · {status}"
-    head = [f"MindSlice dream {run_id}：" + ("运行正常。" if status == "ok"
-                                             else f"运行没有成功（{status}），checkpoint 没有推进，下次重来。")]
+    status_line = f"MindSlice dream {run_id}：" + ("运行正常。" if status == "ok"
+                                                  else f"运行没有成功（{status}），checkpoint 没有推进，下次重来。")
+    head = [status_line]
+    html_parts = [f'<p>{html.escape(status_line)}</p>' if status == "ok"
+                  else f'<div class="warn">{html.escape(status_line)}</div>']
     attachment = None
     if items:
-        head += [f"staging 里有 {len(items)} 处 dream 的改动等你审阅（包括以前没处理完的），这封邮件取代之前的审阅邮件。"
-                 "回复时用下面清单里的编号。", HOWTO]
+        intro = (f"staging 里有 {len(items)} 处 dream 的改动等你审阅（包括以前没处理完的），这封邮件取代之前的审阅邮件。"
+                 "回复时用下面清单里的编号。")
+        head += [intro, HOWTO]
+        html_parts += [
+            f"<p>{html.escape(intro)}</p>",
+            '<div class="howto"><div>直接回复这封邮件，写明编号和怎么处理，例如：</div>'
+            f'<pre>{html.escape(HOWTO_EXAMPLES)}</pre>'
+            '<div>没提到的保持待审。修改后直接生效，确认邮件里会给出最终文本。</div></div>',
+        ]
         if diffs:
             attachment = (f"dream-{run_id}-diff.txt", "\n\n".join(diff_text(n, it) for n, it in enumerate(items, 1)) + "\n")
             head.append(f"每处改动的 diff 在附件 {attachment[0]} 里。")
-        head += [f"#{n} 依赖 {'、'.join(f'#{d}' for d in deps)}：要一起批准，只批准 #{n} 的话它会保持待审。"
-                 for n, deps in dependencies(items).items()]
+            html_parts.append(f"<p>每处改动的 diff 在附件 <code>{html.escape(attachment[0])}</code> 里。</p>")
+        for n, deps in dependencies(items).items():
+            line = f"#{n} 依赖 {'、'.join(f'#{d}' for d in deps)}：要一起批准，只批准 #{n} 的话它会保持待审。"
+            head.append(line)
+            html_parts.append(f'<div class="warn">{html.escape(line)}</div>')
     if others:
-        head.append(f"另有 {others} 处暂存改动不是 dream 的，不在这封邮件里，用 /mindslice:review 审阅。")
+        line = f"另有 {others} 处暂存改动不是 dream 的，不在这封邮件里，用 /mindslice:review 审阅。"
+        head.append(line)
+        html_parts.append(f'<p class="src">{html.escape(line)}</p>')
     parts = ["\n\n".join(head)]
     if items:
         parts.append("━━ 待审改动\n\n" + "\n\n".join(listed(n, it) for n, it in enumerate(items, 1)))
-    if report:
-        parts.append("━━ 运行报告\n\n" + report.strip())
-    return subject, "\n\n".join(parts) + "\n", attachment
+        html_parts.append("<h2>待审改动</h2>" + "".join(listed_html(n, it) for n, it in enumerate(items, 1)))
+    if body_md := report.strip():
+        parts.append("━━ 运行报告\n\n" + body_md)
+        html_parts.append("<hr>" + ("" if body_md.startswith("#") else "<h2>运行报告</h2>") + MD.render(body_md))
+    return subject, "\n\n".join(parts) + "\n", html_page(subject, "\n".join(html_parts)), attachment
 
 
 def notify(cfg: dict, run_id: str, status: str, report: Path | None, force: bool = False) -> str:
@@ -194,8 +251,9 @@ def notify(cfg: dict, run_id: str, status: str, report: Path | None, force: bool
         if status == "ok" and (not items or (not force and [(i["id"], i["sha256"], i["change_ids"]) for i in items] == mailed)):
             return "not needed"
         text = report.read_text(encoding="utf-8") if report and report.exists() else ""
-        subject, body, attachment = review_mail(run_id, status, items, others, text, cfg["mail"].get("attach_diff", False))
-        msg = mail.compose(cfg, subject, body, as_html(body), attachment=attachment)
+        subject, body, page, attachment = review_mail(
+            run_id, status, items, others, text, cfg["mail"].get("attach_diff", False))
+        msg = mail.compose(cfg, subject, body, page, attachment=attachment)
         mail.send(cfg, msg)
     except Exception as e:
         return f"failed: {type(e).__name__}: {e}"
@@ -317,14 +375,15 @@ def handle(cfg: dict, review: dict, msg) -> tuple:
     else:
         sha = {card: it["sha256"] for card, it in staged.items()}
         results, note = execute(cfg, review, answer["decisions"], sha), str(answer.get("message") or "")
-    text = confirmation(cfg, review, results, note)
+    subject = f"Re: {review['subject']}"
+    text, page = confirmation(cfg, review, results, note, subject)
     (run_dir / "report.md").write_text(text, encoding="utf-8")
     write_json(run_dir / "meta.json", {"reply": str(msg["Message-ID"]).strip(), "status": res["status"],
                                        "session_id": res["session_id"], "events": len(events), "decisions": answer,
                                        "results": results})
     counts = Counter(outcome for outcome, _ in results.values())
     line = "处理了一封回复：" + ("，".join(f"{OUTCOMES[o]} {counts[o]}" for o in OUTCOMES if counts[o]) or note)
-    return mail.compose(cfg, f"Re: {review['subject']}", text, reply_to=msg), line
+    return mail.compose(cfg, subject, text, page, reply_to=msg), line
 
 
 def modify(engine: Workspace, item: dict, edits, quote) -> str | None:
@@ -423,32 +482,45 @@ def _execute_locked(engine, review, decided, staged):
     return results
 
 
-def confirmation(cfg: dict, review: dict, results: dict, note: str) -> str:
-    """The answer in the review thread: what took effect (modified cards with their final text), what was dropped,
-    what stays pending and why, and what is still waiting."""
+def confirmation(cfg: dict, review: dict, results: dict, note: str, subject: str = "") -> tuple[str, str]:
+    """The answer in the review thread (plain text and rendered HTML): what took effect (modified cards with their
+    final text), what was dropped, what stays pending and why, and what is still waiting."""
     by_n = {i["n"]: i for i in review["items"]}
 
     def name(n: int) -> str:
         return f"#{n} {by_n[n]['id']}"
 
+    def name_html(n: int) -> str:
+        return f'<span class="num">#{n}</span><code>{html.escape(by_n[n]["id"])}</code>'
+
     done = sorted(results.items())
-    out = []
-    if applied := [name(n) for n, (x, _) in done if x == "applied"]:
-        out.append(f"{OUTCOMES['applied']}：{'、'.join(applied)}")
+    out, html_parts = [], []
+    if applied := [n for n, (x, _) in done if x == "applied"]:
+        out.append(f"{OUTCOMES['applied']}：{'、'.join(name(n) for n in applied)}")
+        html_parts.append(f"<p><strong>{OUTCOMES['applied']}</strong>：{'、'.join(name_html(n) for n in applied)}</p>")
     if modified := [n for n, (x, _) in done if x == "modified"]:
         read = gate.mindslice_json(cfg, "read", *[by_n[n]["id"] for n in modified])
         cards = read.get("cards", [read])  # one address reads as the card itself
         for n, card in zip(modified, cards):
             final = f"{card.get('summary', '')}\n\n{(card.get('body') or '').rstrip()}"
             out.append(f"{OUTCOMES['modified']}：{name(n)}，最终文本：\n\n{final}")
-    if discarded := [name(n) for n, (x, _) in done if x == "discarded"]:
-        out.append(f"{OUTCOMES['discarded']}：{'、'.join(discarded)}")
+            html_parts.append(
+                f"<p><strong>{OUTCOMES['modified']}</strong>：{name_html(n)}，最终文本：</p>"
+                f"<blockquote>{MD.render(final)}</blockquote>")
+    if discarded := [n for n, (x, _) in done if x == "discarded"]:
+        out.append(f"{OUTCOMES['discarded']}：{'、'.join(name(n) for n in discarded)}")
+        html_parts.append(f"<p><strong>{OUTCOMES['discarded']}</strong>：{'、'.join(name_html(n) for n in discarded)}</p>")
     for o in ("pending", "skipped"):
-        if rows := [f"- {name(n)}" + (f"：{d}" if d else "") for n, (x, d) in done if x == o]:
-            out.append(f"{OUTCOMES[o]}：\n" + "\n".join(rows))
+        if items := [(n, d) for n, (x, d) in done if x == o]:
+            out.append(f"{OUTCOMES[o]}：\n" + "\n".join(f"- {name(n)}" + (f"：{d}" if d else "") for n, d in items))
+            rows = "".join(f"<li>{name_html(n)}" + (f"：{MD.renderInline(d)}" if d else "") + "</li>" for n, d in items)
+            html_parts.append(f"<p><strong>{OUTCOMES[o]}</strong>：</p><ul>{rows}</ul>")
     if note:
         out.append(note)
+        html_parts.append(MD.render(note))
     left = [f"#{i['n']}" for i in review["items"] if i["state"] == "pending"]
-    out.append(f"还有 {len(left)} 处待审：{'、'.join(left)}。直接回复这封邮件继续。" if left
-               else "这封审阅邮件里的改动都处理完了。")
-    return "\n\n".join(out) + "\n"
+    tail = (f"还有 {len(left)} 处待审：{'、'.join(left)}。直接回复这封邮件继续。" if left
+            else "这封审阅邮件里的改动都处理完了。")
+    out.append(tail)
+    html_parts.append(f"<p>{html.escape(tail)}</p>")
+    return "\n\n".join(out) + "\n", html_page(subject, "\n".join(html_parts))
