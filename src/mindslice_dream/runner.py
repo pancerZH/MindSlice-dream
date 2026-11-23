@@ -72,8 +72,17 @@ def gc_line(cleaned: dict) -> str:
     return line
 
 
+def sidecar_line(neighbors: dict | None) -> str | None:
+    if neighbors is None:
+        return None
+    if "error" in neighbors:
+        return f"- sidecar：失败，{neighbors['error']}"
+    return (f"- sidecar：新写入近邻 {len(neighbors.get('for_new_writes', {}))} 张，"
+            f"全库未链卡对 {len(neighbors.get('unlinked_pairs', []))} 对")
+
+
 def script_section(status: str, events: list[dict], problems: list, warnings: list, before: dict, after: dict,
-                   cleaned: dict) -> str:
+                   cleaned: dict, neighbors: dict | None = None) -> str:
     def change(key: str) -> str:
         return f"{before[key]} → {after[key]}"
 
@@ -85,6 +94,8 @@ def script_section(status: str, events: list[dict], problems: list, warnings: li
              f"{change('always_chars')} 字符（标题 + 摘要 + 正文）",
              f"- validate：error {len(before['errors'])} → {len(after['errors'])}，warning {change('warnings')}",
              gc_line(cleaned)]
+    if line := sidecar_line(neighbors):
+        lines.append(line)
     if problems:
         lines += ["", "**越界问题**", ""] + [f"- {p}" for p in problems]
     if warnings:
@@ -142,7 +153,8 @@ def dream(cfg: dict, force: bool) -> dict:
     open_drops, drops_text, refused = drops.after_run(cfg, run_dir, state.get("drops", {}), exclude)
     with open(report, "a", encoding="utf-8") as f:
         f.write(drops_text)
-        f.write(script_section(status, events, problems, warnings, before, after, cleaned))
+        f.write(script_section(status, events, problems, warnings, before, after, cleaned,
+                               task.get("semantic_neighbors")))
     latest = paths["runs"] / "latest.md"
     latest.unlink(missing_ok=True)
     latest.symlink_to(Path(run_dir.name) / "report.md")

@@ -106,3 +106,40 @@ def test_deleted_cards_are_not_listed(cfg, ws):
     ms(ws, "write", "projects/demo/other", "--title", "O", "--summary", "O.", "--content", "- o", "--reason", "made")
     ms(ws, "write", "projects/demo/other", "--op", "delete", "--reason", "not needed after all")
     assert task(cfg)["new_writes"] == []
+
+
+def test_sidecar_attaches_semantic_neighbors_and_skips_idle_nights(cfg, tmp_path):
+    import json
+    import sys
+
+    called = tmp_path / "called.json"
+    fake = tmp_path / "fake_sidecar.py"
+    fake.write_text(
+        "import json, sys\n"
+        f"open({str(called)!r}, 'w').write(json.dumps(sys.argv[1:]))\n"
+        "print(json.dumps({'for_cards': {'projects/demo/status': [{'card': 'projects/demo/other', 'title': 'Other', 'score': 0.81}]}, "
+        "'pairs': [{'cards': ['projects/a', 'projects/b'], 'titles': ['A', 'B'], 'score': 0.79}]}))\n"
+    )
+    cfg["sidecar"]["cmd"] = [sys.executable, str(fake)]
+    t = task(cfg)  # first run: new_writes + full_sweep
+    assert t["semantic_neighbors"] == {
+        "for_new_writes": {"projects/demo/status": [{"card": "projects/demo/other", "title": "Other", "score": 0.81}]},
+        "unlinked_pairs": [{"cards": ["projects/a", "projects/b"], "titles": ["A", "B"], "score": 0.79}],
+    }
+    argv = json.loads(called.read_text())
+    assert "--card" in argv and "projects/demo/status" in argv and "--top-pairs" in argv and "--exclude-prefix" in argv
+
+    settle(cfg)
+    called.unlink()
+    assert task(cfg)["triggers"] == []
+    assert not called.exists()  # idle night does not invoke sidecar
+
+
+def test_sidecar_failure_is_fail_soft(cfg, tmp_path):
+    import sys
+
+    bad = tmp_path / "bad_sidecar.py"
+    bad.write_text("import sys; sys.stderr.write('gpu oom\\n'); sys.exit(1)\n")
+    cfg["sidecar"]["cmd"] = [sys.executable, str(bad)]
+    t = task(cfg)
+    assert t["semantic_neighbors"] == {"error": "gpu oom"}

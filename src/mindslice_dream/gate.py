@@ -106,6 +106,35 @@ def head(repo: Path) -> str | None:
     return res.stdout.strip() if res.returncode == 0 else None
 
 
+def semantic_neighbors(cfg: dict, new_cards: list[str], full_sweep: bool) -> dict | None:
+    """Optional MindSlice-sidecar subprocess: unlinked semantic neighbors for new writes and full-sweep pairs.
+    Fail-soft: returns {'error': ...} on failure so sidecar problems never block a dream run."""
+    sc = cfg.get("sidecar") or {}
+    if not sc.get("cmd") or (not new_cards and not full_sweep):
+        return None
+    cmd = [*sc["cmd"], "--workspace", str(cfg["memory"]["workspace"]),
+           "--k", str(sc["k"]), "--min-score", str(sc["min_score"])]
+    for card in new_cards:
+        cmd += ["--card", card]
+    if full_sweep and sc["top_pairs"] > 0:
+        cmd += ["--top-pairs", str(sc["top_pairs"])]
+    for prefix in cfg["dream"]["exclude_prefixes"]:
+        cmd += ["--exclude-prefix", prefix]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                             timeout=sc["timeout_seconds"])
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"error": str(exc)}
+    if res.returncode != 0:
+        return {"error": (res.stderr or res.stdout).strip().splitlines()[-1] if (res.stderr or res.stdout).strip()
+                else f"exit code {res.returncode}"}
+    try:
+        data = json.loads(res.stdout)
+    except json.JSONDecodeError as exc:
+        return {"error": f"invalid JSON from sidecar: {exc}"}
+    return {"for_new_writes": data.get("for_cards", {}), "unlinked_pairs": data.get("pairs", [])}
+
+
 def evaluate(cfg: dict, state: dict, snap: dict, force: bool = False, now: datetime | None = None) -> dict:
     """Tonight's task (the content of input.json); `triggers` is empty when there is nothing to do."""
     now = now or datetime.now().astimezone()
@@ -144,11 +173,12 @@ def evaluate(cfg: dict, state: dict, snap: dict, force: bool = False, now: datet
 
     hits = {"new_writes": bool(writes), "validate": bool(new_issues), "repo_head": any(r["changed"] for r in repos),
             "full_sweep": full_sweep, "force": force}
-    return {
+    triggers = [name for name, hit in hits.items() if hit]
+    task = {
         "date": now.date().isoformat(),
         "workspace": str(cfg["memory"]["workspace"]),
         "mode": dream["mode"],
-        "triggers": [name for name, hit in hits.items() if hit],
+        "triggers": triggers,
         "full_sweep": full_sweep,
         "new_writes": [{"card": path, "writes": w} for path, w in writes.items()],
         "validate_new": new_issues,
@@ -159,6 +189,9 @@ def evaluate(cfg: dict, state: dict, snap: dict, force: bool = False, now: datet
                   "kept": state.get("drops", {}).get("kept", [])},
         "checkpoint": position(events, checkpoint),
     }
+    if triggers and (neighbors := semantic_neighbors(cfg, list(writes), full_sweep)) is not None:
+        task["semantic_neighbors"] = neighbors
+    return task
 
 
 def next_state(state: dict, task: dict, snap: dict) -> dict:

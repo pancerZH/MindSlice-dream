@@ -35,6 +35,12 @@ def load_config(path: Path) -> dict:
     cfg.setdefault("mail", {"to": ""})  # no [mail] section: no review mails
     if "account" in cfg["mail"]:
         cfg["mail"]["account"] = resolve(cfg["mail"]["account"])
+    sidecar = cfg.setdefault("sidecar", {})
+    sidecar["cmd"] = [str(Path(a).expanduser()) if a.startswith("~") else a for a in sidecar.get("cmd", [])]
+    sidecar.setdefault("k", 3)
+    sidecar.setdefault("min_score", 0.65)
+    sidecar.setdefault("top_pairs", 15)
+    sidecar.setdefault("timeout_seconds", 120)
     return cfg
 
 

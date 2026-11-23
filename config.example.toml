@@ -34,3 +34,11 @@ timeout_minutes = 60
 cmd = ["agy", "--print={prompt}", "--model", "gemini-4-neon-high", "--output-format", "json",
        "--dangerously-skip-permissions", "--disable-slash-commands"]
 resume = "agy --conversation {session_id}"
+
+# 可选：调用 MindSlice-sidecar 做跨卡/跨语言语义近邻扫描（写进 input.json 的 semantic_neighbors）。cmd 为空则关闭。
+[sidecar]
+cmd = []   # 例如 ["uv", "--directory", "/path/to/MindSlice-sidecar", "run", "mindslice-sidecar", "neighbors"]
+k = 3
+min_score = 0.65
+top_pairs = 15
+timeout_seconds = 120

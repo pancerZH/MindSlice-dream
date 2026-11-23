@@ -193,3 +193,29 @@ def test_a_failed_cleanup_is_reported_and_the_run_goes_on(cfg, monkeypatch):
     meta = runner.run(cfg)
     assert meta["status"] == "ok" and meta["gc"] == {"error": "mindslice gc failed: disk full"}
     assert "- gc：失败，mindslice gc failed: disk full" in (cfg["paths"]["runs"] / "latest.md").read_text()
+
+
+def test_sidecar_status_is_reported_in_script_section(cfg, tmp_path):
+    import sys
+
+    ok = tmp_path / "ok_sidecar.py"
+    ok.write_text(
+        "import json\n"
+        "print(json.dumps({'for_cards': {'projects/demo/status': [{'card': 'projects/x', 'title': 'X', 'score': 0.8}]}, "
+        "'pairs': [{'cards': ['a', 'b'], 'titles': ['A', 'B'], 'score': 0.77}]}))\n"
+    )
+    cfg["sidecar"]["cmd"] = [sys.executable, str(ok)]
+    meta = runner.run(cfg)
+    assert meta["status"] == "ok"
+    assert "- sidecar：新写入近邻 1 张，全库未链卡对 1 对" in (cfg["paths"]["runs"] / "latest.md").read_text()
+
+
+def test_sidecar_failure_is_reported_without_blocking_run(cfg, tmp_path):
+    import sys
+
+    bad = tmp_path / "bad_sidecar.py"
+    bad.write_text("import sys; sys.stderr.write('model missing\\n'); sys.exit(1)\n")
+    cfg["sidecar"]["cmd"] = [sys.executable, str(bad)]
+    meta = runner.run(cfg)
+    assert meta["status"] == "ok"
+    assert "- sidecar：失败，model missing" in (cfg["paths"]["runs"] / "latest.md").read_text()

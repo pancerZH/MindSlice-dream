@@ -9,7 +9,7 @@
 - 日期：{{date}}
 - 记忆工作区：`{{workspace}}`
 - 记忆命令：`{{ms}}`，下文简写为 `ms`。读写记忆只用它，不用 MCP 工具。
-- 任务输入：`{{input}}`。里面有触发原因（`triggers`）；是否全量扫描（`full_sweep`）；上次运行之后其他会话的新写入（`new_writes`，按卡的路径 `card` 合并，带每次写入的 reason）；validate 新出现的问题（`validate_new`）；正文超过 {{max_chars}} 字符的卡（`oversized`，全量扫描的夜里列出全部，其余夜里只列本次新写入的）；关注的仓库（`repos`，`previous` 是上次运行时的 HEAD，`changed` 表示变过）；整卡删除建议（`drops`，见下面的「整张删卡的建议」）。
+- 任务输入：`{{input}}`。里面有触发原因（`triggers`）；是否全量扫描（`full_sweep`）；上次运行之后其他会话的新写入（`new_writes`，按卡的路径 `card` 合并，带每次写入的 reason）；validate 新出现的问题（`validate_new`）；正文超过 {{max_chars}} 字符的卡（`oversized`，全量扫描的夜里列出全部，其余夜里只列本次新写入的）；关注的仓库（`repos`，`previous` 是上次运行时的 HEAD，`changed` 表示变过）；整卡删除建议（`drops`，见下面的「整张删卡的建议」）；若配置了 sidecar，还有 `semantic_neighbors`（本次新写入卡的未链接语义近邻 `for_new_writes`，以及全量扫描时的全库高相似未链接卡对 `unlinked_pairs`）。
 - 报告：写到 `{{report}}`，用中文 Markdown。
 - 删卡建议：写到 `{{drops}}`，格式见下面的「整张删卡的建议」；没有就不建这个文件。
 - 当前目录是这次的临时工作目录：临时文件（正文、`--also` 用的 JSON、中间结果）都放这里，运行结束后整个目录会被删掉。报告按上面的路径写，不要写在这里；也不要在别处留下文件。
@@ -19,7 +19,7 @@
 
 建议按下面的顺序，便宜的在前。时间不够时，先把前面的做完，并且一定留出时间写报告。
 
-1. **新写入**：按路径读 `new_writes` 里的卡（`ms --json read <card> <card> ...` 一次读多张；卡写入后可能已经 bake 进某个 slice，按路径读到的总是当前生效的那张），对照各自的 reason。reason 是写入的 agent 手里有完整对话时记下的出处；当时的对话你看不到，判断出处只能靠卡里写明的证据和 reason（更早的 reason 用 `ms history <地址>` 查）。要看的是：卡里写成"用户决定"的，卡里或 reason 里有没有证据支持；卡里的事实和 reason 是否一致；和其他卡有没有矛盾。支撑不了的不改，记进报告的"需要用户处理"。
+1. **新写入**：按路径读 `new_writes` 里的卡（`ms --json read <card> <card> ...` 一次读多张；卡写入后可能已经 bake 进某个 slice，按路径读到的总是当前生效的那张），对照各自的 reason。reason 是写入的 agent 手里有完整对话时记下的出处；当时的对话你看不到，判断出处只能靠卡里写明的证据和 reason（更早的 reason 用 `ms history <地址>` 查）。要看的是：卡里写成"用户决定"的，卡里或 reason 里有没有证据支持；卡里的事实和 reason 是否一致；和其他卡（包括反向链接和 `semantic_neighbors.for_new_writes` 里的跨卡/跨语言近邻）有没有矛盾或重复。支撑不了的不改，记进报告的"需要用户处理"。
 2. **新鲜度**：找易变的卡，例如状态、"as of"、版本号、测试数、提交 / 发布 / 合并状态、待办项。对照真实来源核对：
    - 仓库：`git -C <repo> log --oneline -20`、`status -sb`、`branch -a`、`tag`；`changed` 为 true 的仓库，用 `git -C <repo> log --oneline <previous>..<head>` 看变了什么；
    - PyPI：`curl -s https://pypi.org/pypi/<包名>/json`，看 `info.version` 和 `releases` 里的上传时间；
@@ -32,7 +32,7 @@
    - 已经只是历史的条目，删掉，不要改写成新值：已完成或已关闭的事项、被后面的条目取代的 "as of" / 安装状态 / 检查结果、旧版本的发版记录。这些在 git、PyPI 和 `ms history` 里查得到。条目里如果夹着别处没有的决定、教训或坑，先把它写到讲那个主题的卡上，再从这里删掉（用一次 `--also` 提交）。
    状态卡（标题是 "current state"、"当前进度" 这类，或带 `status` 标签）只记现在怎样和还没做完的事，链接到讲细节的卡；按上面的规则清掉历史条目。不是状态卡的卡里，与本卡主题无关的易变事实（"最新版本是 X"、"main = <hash>"），删掉或换成指向状态卡的链接，而不是改成新值。
    先查 `new_writes` 里的卡和 `changed` 仓库相关的卡；`full_sweep` 为 true 时，覆盖全部易变卡（用 `ms search` 和 `ms --json manifest` 找）。
-3. **结构**：修复 `ms --json validate` 报的问题，例如断链、重名别名；读卡时返回 `baseline_superseded_by`（或被取代的卡返回 `unrebased_extensions`）的扩展卡，内容仍成立就 rebase 到新卡；合并重复的卡；处理相互矛盾的卡；把塞了多个主题的卡拆开（见下面的超长卡）。`ms --json diff --scope overlay` 列出 overlay 里覆盖、扩展和取代了别的卡的卡。
+3. **结构**：修复 `ms --json validate` 报的问题，例如断链、重名别名；读卡时返回 `baseline_superseded_by`（或被取代的卡返回 `unrebased_extensions`）的扩展卡，内容仍成立就 rebase 到新卡；合并重复的卡；处理相互矛盾的卡；把塞了多个主题的卡拆开（见下面的超长卡）。`ms --json diff --scope overlay` 列出 overlay 里覆盖、扩展和取代了别的卡的卡。若 `semantic_neighbors` 存在（`for_new_writes` 或 `unlinked_pairs`），读其中的候选卡，重点查同事实分叉、跨语言重复或确实有价值但漏掉的 wikilink；只是同属一个项目或同类型的卡（例如两个不同项目的状态卡）不需要硬补链接。
    只读 slice 原卡上要等 bake 才会消失的警告（例如 overlay 里的副本已经改好的 `long_summary`）不用管。
    **超长卡**：`oversized` 里的卡逐张读、逐张判断。流水账就按第 2 步删掉历史条目；塞了多个主题的就拆开：拆出去的部分写成新卡（标题、摘要、别名只讲那个主题），原卡删掉这部分、留一条指向新卡的链接，链接到原卡的其他卡按需改指新卡，一次 `--also` 提交；重复的语句合并成一条。内容只讲一件事、每条都还有用的，不动。一次做不完的留到下次。
 4. **常驻层**：常驻卡（load="always"，见 `ms --json manifest --limit 0` 的 `always_loaded`）每次会话都会加载，写错了会带进每次会话。过长、或已经没必要每次加载的，提出精简或改成 as-needed。引擎会自动暂存这类改动，等用户批准。
