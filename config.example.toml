@@ -3,7 +3,7 @@
 
 [memory]
 workspace = "~/mindslice"
-mindslice = "mindslice"          # CLI；uv run 时来自本项目 venv（mindslice>=0.2.2）
+mindslice = "mindslice"          # CLI；uv run 时来自本项目 venv（mindslice>=0.2.9）
 
 [paths]
 runs = "runs"                    # 每次运行一个目录，外加 latest.md

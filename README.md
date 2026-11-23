@@ -2,12 +2,12 @@
 
 [中文](README-zh.md)
 
-A nightly "dream" for a MindSlice workspace (default `~/mindslice`). The script first checks whether there is anything to do tonight; if so, it starts one agy session that checks the memory cards against git, PyPI, CI and tests, corrects them, and tidies their structure. The session's `mindslice` is guarded by the program (in stage mode it stages every write; it refuses deletes, apply and the like), and when the session ends, the script checks that it stayed within bounds, then emails you the staged changes for review; reply to the email to approve, discard or amend them. See [PLAN.md](PLAN.md) for the design and decisions.
+A nightly "dream" for a MindSlice workspace (default `~/mindslice`). The script first runs `mindslice gc` (older slice versions and leftovers of killed writes), then checks whether there is anything to do tonight; if so, it starts one agy session that checks the memory cards against git, PyPI, CI and tests, corrects them, and tidies their structure. The session's `mindslice` is guarded by the program (in stage mode it stages every write; it refuses deletes, apply and the like), and when the session ends, the script checks that it stayed within bounds, then emails you the staged changes for review; reply to the email to approve, discard or amend them. See [PLAN.md](PLAN.md) for the design and decisions.
 
 ## Install
 
 ```bash
-uv sync                      # installs mindslice>=0.2.5 and markdown-it-py>=3.0 in .venv
+uv sync                      # installs mindslice>=0.2.9 and markdown-it-py>=3.0 in .venv
 cp config.example.toml config.toml   # then edit workspace, watch.repos, etc.; config.toml stays on this machine and is not committed
 uv run pytest                # fake harness: no real LLM calls, never touches ~/mindslice
 ```

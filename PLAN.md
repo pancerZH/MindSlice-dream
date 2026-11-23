@@ -34,6 +34,7 @@
    依据：报告里的编号是 agy 按自己写的顺序给的，回复用的编号是程序按卡片路径给的，两者对不上（2026-11-21 那次的 12 处改动，报告和邮件里同一个编号没有一处指向同一张卡）；报告也只讲这一次运行，邮件还列以前没处理完的改动。所以编号和清单只能由程序给，不能只留报告。
 15. 整卡删除建议由程序整理（2026-11-22）：dream 把整卡删除的候选写进 `drops.json`（卡、理由、可核对的依据、删前要挪走的语句和去处），不写进报告。程序检查格式，算出每张卡在哪个 slice、@overlay 里有没有副本、哪些生效的卡还链接它、哪些卡扩展它，整理成报告里的一节，随审阅邮件发出（不编号，回复邮件不处理它们）。没处理的候选存在 `state.json` 里跨运行保留，卡不在了就自动移除；用户决定保留的卡记下原因（`mindslice-dream drops --keep`），由 `input.json` 告诉 dream 不再提。删卡仍由用户决定，在 Claude 会话里执行（挪内容、改链接、删 @overlay 副本、`bake @slice --drop`）：dream 和回复邮件都不删、不 bake（用户 2026-11-21：「不要给dream加bake」）；dream 也不提前挪内容，因为用户还没决定删不删。
    依据：2026-11-22 的报告列了 6 张候选，逐张核对后发现：1 条理由与代码不符（说某个界面已被取代，其实仍是默认界面）；3 张卡里有别处没有的内容（一条库的坑、一组实测数据、一个没采纳的方案）；列出的反向链接混进了已被 @overlay 副本取代的旧卡；1 张卡在 @overlay 里还有副本，不先删掉，bake 会把它写回去；1 张最后决定保留。散文写的建议每张都要重新核对，而且只在当次报告里出现。
+16. 每次运行先跑 `mindslice gc`（2026-11-22，用户同意把旧版本 slice 的清理做成引擎的维护命令，由 dream 调用）：每晚定时触发时，gate 判断之前先清理工作区：删除 `slices/` 里没挂载、而 `slice.toml` 的 alias 正由别的目录挂载着的目录（旧版本，以及 bake 中途被杀留下的输出），和被杀的写入留下的临时文件。清理结果记在 `meta.json` 的 `gc` 和报告的脚本检查里；清理失败只记下来，不挡住这次运行。这是程序做的事，不进会话：dream 会话照旧不能删卡、不能 bake。需要引擎 0.2.9 起。
 
 ## 3. 架构总览
 
@@ -176,7 +177,7 @@ runs/<YYYYMMDD-HHMMSS>/
   stdout.log  stderr.log
   report.md         dream 写的报告，后面附整卡删除建议和脚本的检查结果
   drops.json        dream 的整卡删除建议（有才有，决策 15）
-  meta.json         状态、耗时、触发原因、checkpoint、问题列表、resume 命令
+  meta.json         状态、耗时、触发原因、checkpoint、问题列表、gc 结果、resume 命令
 runs/<YYYYMMDD-HHMMSS>-review/   处理一封审阅回复的记录，文件名同上（第 10 节）
 runs/latest.md      指向最近一次的 report.md
 runs/.lock          夜间运行和取回复共用的文件锁
@@ -277,7 +278,7 @@ MindSlice-dream/
   tests/
 ```
 
-- Python 3.12+，依赖只有 `mindslice>=0.2.5` 和渲染邮件 HTML 用的 `markdown-it-py>=3.0`（与 news-agent 一致）。
+- Python 3.12+，依赖只有 `mindslice>=0.2.9` 和渲染邮件 HTML 用的 `markdown-it-py>=3.0`（与 news-agent 一致）。
 - 通过子进程调用 `mindslice` CLI，不 import 引擎内部代码。唯一的例外是 guard 用引擎 CLI 的参数解析器（`build_parser`），这样它和 CLI 对参数的读法完全一致；导入失败时会话的每次调用都失败，不会放行。
 - 代码保持短小，需要判断的放在 prompt 里；只有一个正确答案的规则放在程序里（决策 12）。
 - `--dry-run` 只跑 gate 和输入准备，打印 `input.json`，不启动 agy。

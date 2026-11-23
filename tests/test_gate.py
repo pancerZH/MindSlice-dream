@@ -23,7 +23,7 @@ def test_first_run_takes_recent_writes_and_a_full_sweep(cfg):
 def test_idle_night_is_skipped(cfg):
     settle(cfg)
     runs = sorted(cfg["paths"]["runs"].iterdir())
-    assert runner.run(cfg) == {"status": "skipped"}
+    assert runner.run(cfg)["status"] == "skipped"
     assert sorted(cfg["paths"]["runs"].iterdir()) == runs
     assert gate.load_state(cfg["paths"]["state"])["last_run"]["status"] == "skipped"
 

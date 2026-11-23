@@ -161,3 +161,35 @@ def test_cli_dry_run_prints_the_task_and_changes_nothing(tmp_path, ws, capsys):
     assert task["triggers"] == ["new_writes", "full_sweep"] and task["workspace"] == str(ws)
     assert not (tmp_path / "state.json").exists() and not (tmp_path / "runs").exists()
     assert (ws / ".history" / "changes.jsonl").read_text() == history
+
+
+def test_every_run_cleans_up_older_slice_versions_first(cfg, ws):
+    ms(ws, "bake", "@demo", "--prefix", "projects/")
+    ms(ws, "write", "projects/demo/more", "--summary", "More.", "--reason", "User asked.")
+    ms(ws, "bake", "@demo", "--prefix", "projects/")
+    old = ws / "slices" / "demo.slice"
+    leftover = ws / "overlay" / ".x.md.abcd1234.tmp"
+    leftover.write_text("partial")
+    assert old.is_dir()
+    meta = runner.run(cfg)
+    assert meta["gc"]["old_versions"] == [{"path": str(old), "alias": "@demo"}]
+    assert meta["gc"]["temporary"] == [str(leftover)]
+    assert not old.exists() and not leftover.exists() and (ws / "slices" / "demo-2.slice").is_dir()
+    assert "- gc：删除旧版本 slice 1 个、写入残留 1 个（" in (cfg["paths"]["runs"] / "latest.md").read_text()
+    skipped = runner.run(cfg)  # a night with nothing to do still cleans up
+    assert skipped == {"status": "skipped", "gc": {"dry_run": False, "old_versions": [], "temporary": [],
+                                                   "kept_unmounted": [], "bytes": 0}}
+
+
+def test_a_failed_cleanup_is_reported_and_the_run_goes_on(cfg, monkeypatch):
+    real = gate.mindslice_json
+
+    def failing(cfg, *args):
+        if args == ("gc",):
+            raise RuntimeError("mindslice gc failed: disk full")
+        return real(cfg, *args)
+
+    monkeypatch.setattr(gate, "mindslice_json", failing)
+    meta = runner.run(cfg)
+    assert meta["status"] == "ok" and meta["gc"] == {"error": "mindslice gc failed: disk full"}
+    assert "- gc：失败，mindslice gc failed: disk full" in (cfg["paths"]["runs"] / "latest.md").read_text()

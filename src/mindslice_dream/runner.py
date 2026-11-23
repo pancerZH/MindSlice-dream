@@ -62,7 +62,18 @@ def repo_states(repos: list[Path]) -> dict:
             for r in repos}
 
 
-def script_section(status: str, events: list[dict], problems: list, warnings: list, before: dict, after: dict) -> str:
+def gc_line(cleaned: dict) -> str:
+    if "error" in cleaned:
+        return f"- gc：失败，{cleaned['error']}"
+    line = (f"- gc：删除旧版本 slice {len(cleaned['old_versions'])} 个、写入残留 {len(cleaned['temporary'])} 个"
+            f"（{cleaned['bytes']} 字节）")
+    if cleaned["kept_unmounted"]:
+        line += f"；保留未挂载的 slice {len(cleaned['kept_unmounted'])} 个"
+    return line
+
+
+def script_section(status: str, events: list[dict], problems: list, warnings: list, before: dict, after: dict,
+                   cleaned: dict) -> str:
     def change(key: str) -> str:
         return f"{before[key]} → {after[key]}"
 
@@ -72,7 +83,8 @@ def script_section(status: str, events: list[dict], problems: list, warnings: li
              f"- 卡片：{change('cards')}；暂存待审：{change('pending')}",
              f"- 常驻卡：{len(before['always'])} → {len(after['always'])} 张，"
              f"{change('always_chars')} 字符（标题 + 摘要 + 正文）",
-             f"- validate：error {len(before['errors'])} → {len(after['errors'])}，warning {change('warnings')}"]
+             f"- validate：error {len(before['errors'])} → {len(after['errors'])}，warning {change('warnings')}",
+             gc_line(cleaned)]
     if problems:
         lines += ["", "**越界问题**", ""] + [f"- {p}" for p in problems]
     if warnings:
@@ -92,12 +104,16 @@ def dream(cfg: dict, force: bool) -> dict:
     paths, ws, mode = cfg["paths"], cfg["memory"]["workspace"], cfg["dream"]["mode"]
     exclude = tuple(cfg["dream"]["exclude_prefixes"])
     state = gate.load_state(paths["state"])
+    try:  # older slice versions and leftovers of killed writes (decision 16); a failure must not stop the run
+        cleaned = gate.mindslice_json(cfg, "gc")
+    except RuntimeError as exc:
+        cleaned = {"error": str(exc)}
     before = gate.snapshot(cfg)
     task = gate.evaluate(cfg, state, before, force)
     if not task["triggers"]:
         gate.save_state(paths["state"], gate.next_state(state, task, before) | {
             "last_run": {"status": "skipped", "at": session.now_iso()}})
-        return {"status": "skipped"}
+        return {"status": "skipped", "gc": cleaned}
 
     for old in paths["runs"].glob("*/"):  # leftovers of a run killed before it could tidy up
         session.tidy(old)
@@ -126,7 +142,7 @@ def dream(cfg: dict, force: bool) -> dict:
     open_drops, drops_text, refused = drops.after_run(cfg, run_dir, state.get("drops", {}), exclude)
     with open(report, "a", encoding="utf-8") as f:
         f.write(drops_text)
-        f.write(script_section(status, events, problems, warnings, before, after))
+        f.write(script_section(status, events, problems, warnings, before, after, cleaned))
     latest = paths["runs"] / "latest.md"
     latest.unlink(missing_ok=True)
     latest.symlink_to(Path(run_dir.name) / "report.md")
@@ -139,8 +155,8 @@ def dream(cfg: dict, force: bool) -> dict:
             "triggers": task["triggers"], "full_sweep": task["full_sweep"], "mode": mode, "engine": engine,
             "exit_code": res["exit_code"], "session_id": res["session_id"], "resume": res["resume"],
             "checkpoint": task["checkpoint"], "advanced": status == "ok", "problems": problems,
-            "warnings": warnings, "drops_refused": refused, "run_dir": str(run_dir), "report": str(report),
-            "cmd": res["cmd"],
+            "warnings": warnings, "drops_refused": refused, "gc": cleaned, "run_dir": str(run_dir),
+            "report": str(report), "cmd": res["cmd"],
             "mail": review.notify(cfg, run_dir.name, status, report)}
     (run_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return meta

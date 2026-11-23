@@ -2,12 +2,12 @@
 
 [English](README.md)
 
-给 MindSlice 工作区（默认 `~/mindslice`）做夜间 dream：脚本先判断今晚有没有事做，有就启动一次 agy 会话，把记忆卡对照 git、PyPI、CI 和测试核对、改正，并整理结构；会话拿到的 `mindslice` 由程序把关（stage 模式下自动暂存每次写入，拒绝删卡、apply 等），会话结束后脚本再检查它有没有越界，再把暂存的改动发邮件给你审阅，你回复邮件就能批准、放弃或修改。设计和决策见 [PLAN.md](PLAN.md)。
+给 MindSlice 工作区（默认 `~/mindslice`）做夜间 dream：脚本先跑 `mindslice gc`（删掉旧版本 slice 和被杀的写入留下的残留），再判断今晚有没有事做，有就启动一次 agy 会话，把记忆卡对照 git、PyPI、CI 和测试核对、改正，并整理结构；会话拿到的 `mindslice` 由程序把关（stage 模式下自动暂存每次写入，拒绝删卡、apply 等），会话结束后脚本再检查它有没有越界，再把暂存的改动发邮件给你审阅，你回复邮件就能批准、放弃或修改。设计和决策见 [PLAN.md](PLAN.md)。
 
 ## 安装
 
 ```bash
-uv sync                      # 依赖只有 mindslice>=0.2.5 和 markdown-it-py>=3.0，CLI 装在 .venv 里
+uv sync                      # 依赖只有 mindslice>=0.2.9 和 markdown-it-py>=3.0，CLI 装在 .venv 里
 cp config.example.toml config.toml   # 再改 workspace、watch.repos 等；config.toml 只在本机，不进 git
 uv run pytest                # fake harness，不调用真实 LLM，不碰 ~/mindslice
 ```
