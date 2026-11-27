@@ -15,7 +15,7 @@ from pathlib import Path
 
 from markdown_it import MarkdownIt
 from mindslice import MindSliceError, Workspace
-from mindslice.operations.writer import fork_seed
+from mindslice.model.card import qualify_refs
 
 from . import gate, mail, session
 
@@ -96,7 +96,7 @@ def card_diff(ws: Path, item: dict, catalogs) -> tuple[str, list[str], int]:
             source = f"从 {alias} 复制并修改"
             raw = (mount_dirs(ws)[alias] / f"{rel}.md").read_text(encoding="utf-8")
             base, old = parse_card(raw)
-            _, qualified = parse_card(fork_seed(raw, origin, catalogs))
+            _, qualified = parse_card(qualify_refs(raw, alias, catalogs))
         else:
             source, base, old = "新卡", {}, []
     except (OSError, KeyError, ValueError):  # a staged delete, a slice mounted from an archive, ...

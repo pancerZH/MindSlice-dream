@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 # The CLI runs the dream. Email review uses the same engine's workspace lock and versioned review API,
 # and markdown-it-py renders the Markdown report in review and confirmation emails into HTML.
 dependencies = [
-    "mindslice>=0.2.9",
+    "mindslice>=0.2.10",
     "markdown-it-py>=3.0",
 ]
 
