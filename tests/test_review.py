@@ -286,6 +286,21 @@ def test_reply_text_keeps_only_the_users_words():
     assert mail.reply_text(html_only) == "1 批准\n写给 <邮箱>"
 
 
+def test_reply_text_from_gmail_mobile_keeps_words_right_above_the_quote():
+    # Gmail's app: no blank line between the user's words and "On ... wrote:" in the plain part
+    msg = EmailMessage()
+    msg.set_content("全部批准\nOn Sat, Nov 28, 2026 at 03:25 <me+dream@example.com> wrote:\n\n> #1 projects/a\n")
+    msg.add_alternative('<div dir="auto">全部批准<br><div class="gmail_quote gmail_quote_container">'
+                        '<div dir="ltr" class="gmail_attr">On Sat wrote:<br></div><blockquote>#1</blockquote></div>',
+                        subtype="html")
+    assert mail.reply_text(msg) == "全部批准"
+    web = EmailMessage()  # Gmail web: each line after the first is its own div
+    web.set_content("批准 1-5\n放弃 6\n\nOn Sat wrote:\n\n> #1\n")
+    web.add_alternative('<div dir="ltr">批准 1-5<div>放弃 6</div></div><br><div class="gmail_quote">On Sat wrote:'
+                        '<blockquote>#1</blockquote></div>', subtype="html")
+    assert mail.reply_text(web) == "批准 1-5\n放弃 6"
+
+
 def test_gmail_labels_are_unquoted():
     prefix = b'12 (X-GM-LABELS (\\Inbox "\\\\Sent" "a (b)") UID 5 BODY[HEADER] {3}'
     assert mail.labels(prefix) == {"\\Inbox", "\\Sent", "a (b)"}

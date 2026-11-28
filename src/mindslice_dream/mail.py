@@ -121,12 +121,16 @@ def fetch(cfg: dict, days: int, skip: set[str]) -> list[EmailMessage]:
 
 def reply_text(msg: EmailMessage) -> str:
     """What the user wrote: the quoted mail, the "On ... wrote:" line above it and the signature are dropped, and
-    addresses are masked, since the text goes to the model that reads it."""
-    part = msg.get_body(preferencelist=("plain", "html"))
-    text = part.get_content() if part is not None else ""
-    if part is not None and part.get_content_type() == "text/html":
-        text = re.split(r'<div class="gmail_quote|<blockquote', text, maxsplit=1)[0]
-        text = html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<br\s*/?>|</(?:p|div)>", "\n", text, flags=re.I)))
+    addresses are masked, since the text goes to the model that reads it. Gmail's HTML part marks the quote exactly
+    (div.gmail_quote holds the "On ... wrote:" line), so it is used when it has the marker; in the plain part Gmail's
+    mobile app puts that line right under the user's words, with no blank line between them."""
+    page = msg.get_body(preferencelist=("html",))
+    head, *quote = re.split(r'<div class="gmail_quote|<blockquote', page.get_content() if page else "", maxsplit=1)
+    plain = msg.get_body(preferencelist=("plain",))
+    if quote or plain is None:
+        text = html.unescape(re.sub(r"<[^>]+>", "", re.sub(r"<br\s*/?>|</?(?:p|div)\b[^>]*>", "\n", head, flags=re.I)))
+    else:
+        text = plain.get_content()
     kept = []
     for line in text.splitlines():
         if line.rstrip() == "--":  # "-- " starts the signature
